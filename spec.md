@@ -23,16 +23,23 @@ Target size: roughly 300–350 lines total (runner, Context, Error, Preview, Res
 ### 2.1 Caller contract
 
 ```elixir
-Enact.run(ActionModule, params, actor: actor)          # required: actor
-Enact.run(ActionModule, params, actor: actor, repo: R) # repo override (tests; default from app config)
-Enact.run(ActionModule, params, actor: actor,
-          confirm_digest: digest)                      # optional — see §12 (dry-run confirmation)
+# required: actor
+Enact.run(ActionModule, params, actor: actor)
+# repo override (tests; default from app config)
+Enact.run(ActionModule, params, actor: actor, repo: R)
+
+Enact.run(ActionModule, params,
+  actor: actor,
+  # optional — see §12 (dry-run confirmation)
+  confirm_digest: digest
+)
 
 # Returns:
 {:ok, result}
 {:error, %Enact.Error{type: :invalid | :forbidden | :not_found | :conflict | :internal}}
 
-Enact.dry_run(ActionModule, params, actor: actor)      # same options as run/3, minus confirm_digest
+# same options as run/3, minus confirm_digest
+Enact.dry_run(ActionModule, params, actor: actor)
 # Returns: {:ok, %Enact.Preview{}} | {:error, %Enact.Error{}}   — see §12
 ```
 
@@ -64,12 +71,17 @@ Every callback is either **pure data** or **a single-purpose function over (chan
 
 ```elixir
 %Enact.Context{
-  actor:   term(),            # required, from opts; opaque (struct, scope, or :anonymous)
-  subject: struct() | nil,    # filled by load step: updated record (patch) or parent anchor (create)
-  params:  map(),             # raw params — kept for presence checks & audit
-  repo:    module(),
-  mode:    :create | :patch,  # from action config
-  assigns: %{}                # resolve step stashes loaded references here
+  # required, from opts; opaque (struct, scope, or :anonymous)
+  actor: term(),
+  # filled by load step: updated record (patch) or parent anchor (create)
+  subject: struct() | nil,
+  # raw params — kept for presence checks & audit
+  params: map(),
+  repo: module(),
+  # from action config
+  mode: :create | :patch,
+  # resolve step stashes loaded references here
+  assigns: %{}
 }
 ```
 
@@ -128,7 +140,8 @@ defmodule Enact.InputSchema do
   @callback fields(mode :: atom()) :: [atom()]
   @callback from_subject(subject :: struct()) :: struct()
 
-  @optional_callbacks from_subject: 1   # required iff a patch-mode action uses the module
+  # required iff a patch-mode action uses the module
+  @optional_callbacks from_subject: 1
 end
 ```
 
@@ -148,38 +161,51 @@ defmodule MyApp.Inputs.ProjectInput do
   use Ecto.Schema
   import Ecto.Changeset
 
-  @behaviour Enact.InputSchema            # top-level input modules declare the contract (§4.1)
+  # top-level input modules declare the contract (§4.1)
+  @behaviour Enact.InputSchema
 
   @primary_key false
   embedded_schema do
     field :name, :string
     field :slug, :string
-    field :priority, :integer             # NO defaults — guardrail-enforced
-    field :owner_id, :string              # public-facing ID; resolved later
+    # NO defaults — guardrail-enforced
+    field :priority, :integer
+    # public-facing ID; resolved later
+    field :owner_id, :string
     embeds_many :milestones, Milestone
   end
 
-  @all      ~w(name slug priority owner_id)a
-  @patch    @all -- [:slug]               # e.g. slug immutable after create
+  @all ~w(name slug priority owner_id)a
+  # e.g. slug immutable after create
+  @patch @all -- [:slug]
   @required ~w(name slug)a
 
-  @impl true                              # one annotation covers both heads
+  # one annotation covers both heads
+  @impl true
   def changeset(base, params, :create) do
-    base |> cast(params, @all) |> validate_required(@required)
-         |> cast_embed(:milestones, required: true) |> base_validations()
+    base
+    |> cast(params, @all)
+    |> validate_required(@required)
+    |> cast_embed(:milestones, required: true)
+    |> base_validations()
   end
 
   def changeset(base, params, :patch) do
-    base |> cast(params, @patch) |> validate_required(@required)   # base makes this correct on PATCH (§5.3)
-         |> cast_embed(:milestones) |> base_validations()
+    # base makes this correct on PATCH (§5.3)
+    base
+    |> cast(params, @patch)
+    |> validate_required(@required)
+    |> cast_embed(:milestones)
+    |> base_validations()
   end
 
   @impl true
   def fields(:create), do: @all
-  def fields(:patch),  do: @patch
+  def fields(:patch), do: @patch
 
   @impl true
-  def from_subject(project) do          # subject → input vocabulary; embeds never seeded (§5.3)
+  # subject → input vocabulary; embeds never seeded (§5.3)
+  def from_subject(project) do
     %__MODULE__{
       name: project.name,
       slug: project.slug,
@@ -188,7 +214,8 @@ defmodule MyApp.Inputs.ProjectInput do
     }
   end
 
-  defp base_validations(cs), do: cs       # format/bounds/inclusion rules (elided)
+  # format/bounds/inclusion rules (elided)
+  defp base_validations(cs), do: cs
 
   defmodule Milestone do
     use Ecto.Schema
@@ -282,8 +309,10 @@ def from_subject(project) do
     name: project.name,
     slug: project.slug,
     priority: project.priority,
-    owner_id: PublicIds.encode(:user, project.owner_id)   # subject → input vocabulary
+    # subject → input vocabulary
+    owner_id: PublicIds.encode(:user, project.owner_id)
   }
+
   # embeds intentionally left at structural defaults — never seeded
 end
 ```
@@ -324,8 +353,10 @@ Spec is declarative data (consistent with the data-callback rule; enables the in
 ```elixir
 def resolvers do
   [
-    owner:            {:owner_id, &fetch_owner/2},                          # scalar
-    milestone_owners: {[:milestones, :owner_id], &fetch_milestone_owners/2} # path form → batch
+    # scalar
+    owner: {:owner_id, &fetch_owner/2},
+    # path form → batch
+    milestone_owners: {[:milestones, :owner_id], &fetch_milestone_owners/2}
   ]
 end
 ```
@@ -432,14 +463,19 @@ The pipeline is already staged for this: every step before `execute` is side-eff
 ```elixir
 Enact.dry_run(ActionModule, params, actor: actor)
 
-{:ok, %Enact.Preview{
-  action:   ActionModule,
-  mode:     :patch,
-  updates:  %{...},        # Enact.updates/2 output — casted, normalized, validated
-  resolved: [:owner],      # names of resolvers that succeeded — never the structs
-  digest:   "sha256:..."   # hash of the canonical updates map
-}}
-| {:error, %Enact.Error{}}  # identical error surface to run/3
+{:ok,
+ %Enact.Preview{
+   action: ActionModule,
+   mode: :patch,
+   # Enact.updates/2 output — casted, normalized, validated
+   updates: %{...},
+   # names of resolvers that succeeded — never the structs
+   resolved: [:owner],
+   # hash of the canonical updates map
+   digest: "sha256:..."
+ }}
+# identical error surface to run/3
+| {:error, %Enact.Error{}}
 ```
 
 Design decisions:
