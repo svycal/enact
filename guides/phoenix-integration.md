@@ -5,8 +5,8 @@ Enact has no Phoenix dependency, so a host app wires three seams itself: the act
 ## Setup
 
 ```elixir
-# mix.exs
-{:enact, "~> 0.1.0"}
+# mix.exs (from GitHub until Enact is published to Hex)
+{:enact, github: "svycal/enact"}
 
 # config/config.exs
 config :enact, repo: MyApp.Repo
