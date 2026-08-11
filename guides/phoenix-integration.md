@@ -44,6 +44,24 @@ end
 
 Only actions declaring `anonymous?: true` in `config/0` accept an anonymous actor; everything else returns `:forbidden` before any pipeline work. Grep for `anonymous?: true` to audit your unauthenticated write surface.
 
+### Not using scopes?
+
+Nothing requires the scope pattern — the actor is opaque to Enact, so any term works. In an app that assigns `current_user`, pass it directly:
+
+```elixir
+Enact.run(CreateProject, params, actor: conn.assigns.current_user)
+```
+
+Authenticated actors need no `Enact.Actor` impl at all — the fallback answers `anonymous?/1` with `false` for any term. Your actions' `authorize/1` and fetchers simply read `ctx.actor` as a user struct instead of a scope.
+
+The rule for public endpoints is unchanged: never pass `nil`. The bare `:anonymous` atom is the zero-ceremony anonymous actor, built in:
+
+```elixir
+Enact.run(CreateBooking, params, actor: :anonymous)
+```
+
+The trade-off versus a rich anonymous scope is that `:anonymous` carries no session id or IP — if your `anonymous?: true` actions need those for rate limiting or audit, that's the cue to graduate to a scope-shaped actor.
+
 ## Controllers
 
 Phoenix merges path params into `params`, so the subject id (`load/2` reads it) and the body arrive together — pass `params` straight through:
