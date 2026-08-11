@@ -4,7 +4,7 @@ A thin, behaviour-based action layer for application write operations, published
 
 ## 1. Purpose and philosophy
 
-Enact standardizes the shape of every write operation: cast → load → authorize → validate → resolve → execute → after-commit. It is **Plug for writes** — the value is the uniform pipeline shape, the actor context, and the error taxonomy, not any novel validation or persistence machinery.
+Enact standardizes the shape of every write operation: load → cast → authorize → validate → resolve → execute → after-commit. It is **Plug for writes** — the value is the uniform pipeline shape, the actor context, and the error taxonomy, not any novel validation or persistence machinery.
 
 **Enact orchestrates; Ecto does the work.** Validation is Ecto changesets. Input casting is Ecto embedded schemas. Persistence is the host application's existing Ecto schemas and changesets. Enact adds no parallel type system, no validation vocabulary, and no DSL.
 
@@ -458,7 +458,7 @@ Packaging: ships as a Hex package from the start, so it can be shared across mul
 
 Motivation: agent-facing surfaces (e.g. MCP tools with a confirmation step) need to take user input, validate it fully, and reflect the casted/normalized changes back for confirmation before anything persists.
 
-The pipeline is already staged for this: every step before `execute` is side-effect free (validate/resolve perform DB reads only; the transaction opens at persist). `dry_run/3` runs `cast → load → authorize → validate → resolve`, then stops.
+The pipeline is already staged for this: every step before `execute` is side-effect free (validate/resolve perform DB reads only; the transaction opens at persist). `dry_run/3` runs `load → cast → authorize → validate → resolve`, then stops.
 
 ```elixir
 Enact.dry_run(ActionModule, params, actor: actor)
@@ -471,7 +471,7 @@ Enact.dry_run(ActionModule, params, actor: actor)
    updates: %{...},
    # names of resolvers that succeeded — never the structs
    resolved: [:owner],
-   # hash of the canonical updates map
+   # hash binding action, mode, and the canonical updates map
    digest: "sha256:..."
  }}
 # identical error surface to run/3
@@ -482,7 +482,7 @@ Design decisions:
 
 - **Distinct `%Enact.Preview{}` struct** — callers must be structurally unable to confuse "validated" with "executed". Never a flag on the normal result.
 - **Preview carries `updates/2` output, not the changeset.** It is the canonical, post-normalization "what will be persisted" map — the single definition of the diff shared by validation, persistence, and preview. What the user confirms is definitionally what executes.
-- **Confirmation digest.** `dry_run` digests the canonically-encoded updates map (deterministic encoding — sorted keys, stable struct/date encoding; Elixir map ordering is not sufficient). `run/3` accepts optional `confirm_digest:`, recomputes post-validation, and returns `:conflict` on mismatch: "the user confirmed _this exact change_" becomes a mechanical guarantee across the confirmation gap. Non-confirmation callers never see it.
+- **Confirmation digest.** `dry_run` digests the action module, the mode, and the canonically-encoded updates map together (deterministic encoding — sorted keys, stable struct/date encoding; Elixir map ordering is not sufficient). Folding action and mode into the hash makes the guarantee total: a digest minted for one action or mode never confirms another, and input-less actions (whose updates are always `%{}`) don't collapse to one shared digest. `run/3` accepts optional `confirm_digest:`, recomputes post-validation, and returns `:conflict` on mismatch: "the user confirmed _this exact change_" becomes a mechanical guarantee across the confirmation gap. Non-confirmation callers never see it.
 - **No reservation semantics (non-goal).** A preview is not a promise; the confirming `run/3` re-executes the full pipeline, and races surface as `:invalid`/`:conflict` normally. If a domain needs "hold this resource during confirmation", model it as an explicit domain action (a hold with a TTL), never as dry-run machinery.
 - **Resolved references leak nothing.** The preview lists resolver _names_ that succeeded; loaded structs stay in `ctx.assigns` and never reach the caller (field-leakage risk toward agents). If confirmation UX needs display info ("assigning to Jane Doe"), that is host-app rendering; a `preview/2` option on resolver specs is a deferred second-use extraction (§13).
 - **Patch previews carry the provided keys** (`updates/2` semantics, §5.2), and the subject is loaded — host apps render old → new diffs by comparing updates against the subject, no additional machinery.
