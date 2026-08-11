@@ -127,6 +127,38 @@ Two renderer policies to decide once:
 - **404/403 collapse** — rendering `:forbidden` as 404 is defense-in-depth against existence leaks. Keep the two types distinct internally (different bugs); collapse only at the renderer.
 - **Stable error codes** — resolver failures carry `validation: :resolution` in the error metadata, so `translate_error/1` can emit machine-readable codes distinguishing reference errors from format errors without string matching.
 
+## Constraint errors and stale races
+
+A `{:error, %Ecto.Changeset{}}` returned from `execute/2` rolls the transaction back and is promoted to `:invalid` — this is how declared constraints (`unique_constraint`, `foreign_key_constraint`) surface as ordinary 422 field errors when the database catches a race that pre-flight validation couldn't.
+
+One caveat: **stale-entry races arrive through the same channel.** `Repo.update(changeset, stale_error_field: :lock_version)` also returns `{:error, changeset}`, so without intervention an optimistic-lock failure renders as `:invalid` — a field error on `:lock_version` — when it is really the "input was fine; the world changed" case that `:conflict` (409) exists for. If an action uses optimistic locking, translate that specific failure in `execute/2`; the runner passes an `%Enact.Error{}` through untouched:
+
+```elixir
+@impl Enact.Action
+def execute(changeset, ctx) do
+  result =
+    ctx.subject
+    |> Project.changeset(Enact.updates(changeset, ctx))
+    |> Ecto.Changeset.optimistic_lock(:lock_version)
+    |> ctx.repo.update(stale_error_field: :lock_version)
+
+  case result do
+    {:error, %Ecto.Changeset{errors: errors} = failed} ->
+      if errors[:lock_version] do
+        {:error, Enact.Error.conflict(:stale)}
+      else
+        # constraint errors keep flowing to :invalid
+        {:error, failed}
+      end
+
+    other ->
+      other
+  end
+end
+```
+
+Related: the changeset in a promoted constraint error is the *persistence* changeset, so keep constraint-bearing field names aligned with the input schema's names (or re-map in `execute/2`) so the rendered field addressing matches your API contract.
+
 ## Background jobs
 
 Same calling convention — reconstruct the actor from stored identity; never bypass:
