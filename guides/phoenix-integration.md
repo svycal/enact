@@ -159,6 +159,32 @@ end
 
 Related: the changeset in a promoted constraint error is the *persistence* changeset, so keep constraint-bearing field names aligned with the input schema's names (or re-map in `execute/2`) so the rendered field addressing matches your API contract.
 
+If an action would rather never reflect the persistence changeset — it declares no constraints, or its persistence field names don't match the input's — treat an unexpected changeset error as what it is: validation and persistence have drifted, which is a bug, not caller input. Log it for your own introspection and return `:internal` (the runner passes an `%Enact.Error{}` through untouched, and `reason` is never serialized — the caller sees only a generic 500):
+
+```elixir
+require Logger
+
+@impl Enact.Action
+def execute(changeset, ctx) do
+  updates = Enact.updates(changeset, ctx)
+
+  case ctx.repo.insert(Project.changeset(%Project{}, updates)) do
+    {:ok, project} ->
+      {:ok, project}
+
+    {:error, failed} ->
+      Logger.error(
+        "#{inspect(__MODULE__)} persistence changeset rejected pre-validated input: " <>
+          inspect(failed.errors)
+      )
+
+      {:error, Enact.Error.internal(:persistence_rejected)}
+  end
+end
+```
+
+This is the spec's ":internal is a bug bucket" discipline in practice — every occurrence in production logs is a drift to fix, never something to render.
+
 ## Background jobs
 
 Same calling convention — reconstruct the actor from stored identity; never bypass:
