@@ -88,7 +88,7 @@ end
 
 ## PATCH semantics
 
-Omitted key → untouched. Explicit `null` → clears the scalar. Array key present → replaces wholesale; `[]` clears (arrays never clear with `null`). `Enact.updates/2` implements all of this via presence-in-params — trust it rather than hand-rolling merge logic in `execute/2`.
+Omitted key → untouched. Explicit `null` → clears the scalar. Array key present → replaces wholesale; `[]` clears (arrays never clear with `null`). `Enact.updates/2` implements all of this via presence-in-params — trust it rather than hand-rolling merge logic in `execute/2`. (Mechanics explained in the Change Detection guide, `guides/change-detection.md`.)
 
 ## Resolvers
 
