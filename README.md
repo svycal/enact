@@ -30,15 +30,19 @@ config :enact, repo: MyApp.Repo
 defmodule MyApp.Projects.Actions.CreateProject do
   use Enact.Action
 
+  alias MyApp.Accounts
+  alias MyApp.Projects.Inputs.ProjectInput
+  alias MyApp.Projects.Project
+
   @impl Enact.Action
-  def input, do: MyApp.Projects.Inputs.ProjectInput
+  def input, do: ProjectInput
 
   @impl Enact.Action
   def authorize(ctx), do: MyApp.Policy.can?(ctx.actor, :create_project)
 
   @impl Enact.Action
   def resolvers do
-    [owner: {:owner_id, &MyApp.Fetchers.fetch_org_user/2}]
+    [owner: {:owner_id, &fetch_owner/2}]
   end
 
   @impl Enact.Action
@@ -48,14 +52,23 @@ defmodule MyApp.Projects.Actions.CreateProject do
       |> Enact.updates(ctx)
       |> Map.put(:owner_id, ctx.assigns.owner.id)
 
-    %MyApp.Project{org_id: ctx.actor.org.id}
-    |> MyApp.Project.changeset(updates)
+    %Project{org_id: ctx.actor.org.id}
+    |> Project.changeset(updates)
     |> ctx.repo.insert()
   end
 
   @impl Enact.Action
   def after_commit(project, _ctx) do
     MyApp.Analytics.track(:project_created, project)
+  end
+
+  # the context owns the trust-anchor-scoped query; the fetcher adapts
+  # its result to the resolver contract
+  defp fetch_owner(public_id, ctx) do
+    case Accounts.get_org_user(ctx.actor, public_id) do
+      nil -> :error
+      user -> {:ok, user}
+    end
   end
 end
 ```
@@ -97,11 +110,15 @@ defmodule MyApp.Projects.Inputs.ProjectInput do
 
   @impl Enact.InputSchema
   def changeset(base, params, :create) do
-    base |> cast(params, @all) |> validate_required(@required)
+    base
+    |> cast(params, @all)
+    |> validate_required(@required)
   end
 
   def changeset(base, params, :patch) do
-    base |> cast(params, @patch) |> validate_required(@required)
+    base
+    |> cast(params, @patch)
+    |> validate_required(@required)
   end
 
   @impl Enact.InputSchema

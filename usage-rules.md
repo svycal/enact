@@ -35,14 +35,18 @@ lib/my_app/projects/
 defmodule MyApp.Projects.Actions.UpdateProject do
   use Enact.Action
 
+  alias MyApp.Projects
+  alias MyApp.Projects.Inputs.ProjectInput
+  alias MyApp.Projects.Project
+
   @impl Enact.Action
   def config, do: [mode: :patch, loads_subject?: true]
 
   @impl Enact.Action
-  def input, do: MyApp.Projects.Inputs.ProjectInput
+  def input, do: ProjectInput
 
   @impl Enact.Action
-  def load(%{"id" => id}, ctx), do: MyApp.Projects.get_project(ctx.actor, id)
+  def load(%{"id" => id}, ctx), do: Projects.get_project(ctx.actor, id)
 
   @impl Enact.Action
   def authorize(ctx), do: MyApp.Policy.can?(ctx.actor, :update, ctx.subject)
@@ -50,7 +54,10 @@ defmodule MyApp.Projects.Actions.UpdateProject do
   @impl Enact.Action
   def execute(changeset, ctx) do
     updates = Enact.updates(changeset, ctx)
-    ctx.subject |> MyApp.Project.changeset(updates) |> ctx.repo.update()
+
+    ctx.subject
+    |> Project.changeset(updates)
+    |> ctx.repo.update()
   end
 end
 ```
