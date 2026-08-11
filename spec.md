@@ -157,7 +157,7 @@ end
 Field definitions are written once; per-mode deltas are expressed as data (cast lists / required lists). Convention (illustrative example — a `Project` resource with nested milestones):
 
 ```elixir
-defmodule MyApp.Inputs.ProjectInput do
+defmodule MyApp.Projects.Inputs.ProjectInput do
   use Ecto.Schema
   import Ecto.Changeset
 
@@ -242,7 +242,7 @@ end
 - The runner calls `module.changeset(base, params, ctx.mode)`.
 - `base_validations/1` holds rules **intrinsic to the payload** (format, bounds, inclusion). Action/actor-aware rules stay in the action's `validate/2`. Dividing line: "true of this data anywhere" vs. "true in this operation." Input modules take no ctx/repo — keep them dependency-free.
 - Per-item validations for embeds live in the item schema's own `changeset/2`; `cast_embed` invokes them and handles error nesting and `valid?` propagation natively.
-- Nested item modules start nested inside the input module; promote to a shared `Inputs` namespace on second use.
+- Nested item modules start nested inside the input module; promote to the context's `Inputs` namespace on second use. Actions and inputs organize by context (`MyApp.Projects.Actions.CreateProject`, `MyApp.Projects.Inputs.ProjectInput`), module names mirroring paths.
 - **When to split rather than share:** if expressing the create/patch delta requires conditionals inside the changeset functions (beyond required-ness and cast lists), the payloads aren't really the same — write separate input modules.
 - Escalation for a third variant (admin, API-version): additional changeset head + fields list; mode atom may come from `config/0`. Do not pre-build.
 

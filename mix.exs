@@ -38,7 +38,9 @@ defmodule Enact.MixProject do
   defp package do
     [
       licenses: ["MIT"],
-      links: %{"GitHub" => @source_url}
+      links: %{"GitHub" => @source_url},
+      files:
+        ~w(lib guides mix.exs README.md LICENSE CHANGELOG.md usage-rules.md spec.md .formatter.exs)
     ]
   end
 
@@ -46,7 +48,22 @@ defmodule Enact.MixProject do
     [
       main: "Enact",
       source_url: @source_url,
-      extras: ["README.md", "spec.md": [title: "Design Specification"]]
+      extras: [
+        "README.md",
+        "usage-rules.md": [title: "Usage Rules"],
+        "guides/phoenix-integration.md": [title: "Phoenix Integration"],
+        "guides/testing.md": [title: "Testing Host Applications"],
+        "spec.md": [title: "Design Specification"]
+      ],
+      groups_for_extras: [
+        Guides: ["usage-rules.md", ~r/guides\/.*/]
+      ],
+      groups_for_modules: [
+        "Behaviours & protocols": [Enact.Action, Enact.InputSchema, Enact.Actor],
+        Data: [Enact.Context, Enact.Error, Enact.Preview],
+        "Pipeline support": [Enact.Resolve, Enact.Validations, Enact.Guardrails],
+        Testing: [Enact.Test]
+      ]
     ]
   end
 end

@@ -123,13 +123,21 @@ defmodule Enact do
   A key is provided even when its value is `nil` (an explicit null-clear
   is a statement). Accepts a single atom for top-level presence, or a path
   where atoms descend into maps (string- or atom-keyed) and non-negative
-  integers index into lists:
+  integers index into lists. Anything unreachable — missing key,
+  out-of-range index, non-map element — returns `false`. Never raises and
+  never converts strings to atoms.
 
-      Enact.provided?(ctx, :items)
-      Enact.provided?(ctx, [:items, 2, :quantity])
-
-  Anything unreachable — missing key, out-of-range index, non-map element —
-  returns `false`. Never raises and never converts strings to atoms.
+      iex> ctx = %Enact.Context{params: %{"note" => nil, "items" => [%{"qty" => 1}]}}
+      iex> Enact.provided?(ctx, :note)
+      true
+      iex> Enact.provided?(ctx, :missing)
+      false
+      iex> Enact.provided?(ctx, [:items, 0, :qty])
+      true
+      iex> Enact.provided?(ctx, [:items, 5, :qty])
+      false
+      iex> Enact.provided?(ctx, [:note, :deep])
+      false
   """
   @spec provided?(Context.t(), atom() | [atom() | non_neg_integer()]) :: boolean()
   def provided?(%Context{params: params}, key) when is_atom(key), do: walk(params, [key])

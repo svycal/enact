@@ -3,6 +3,8 @@ defmodule EnactTest do
 
   @moduletag :capture_log
 
+  doctest Enact
+
   import Enact.Test, only: [errors_on: 1]
 
   alias Enact.{Context, Error}

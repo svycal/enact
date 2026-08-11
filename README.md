@@ -1,6 +1,6 @@
 # Enact
 
-A thin, behaviour-based action layer for application write operations — **Plug for writes**. Enact standardizes the shape of every write:
+A thin, behaviour-based action layer for application write operations. Enact standardizes the shape of every write:
 
 ```
 load → cast → authorize → validate → resolve → execute → after_commit
@@ -27,11 +27,11 @@ config :enact, repo: MyApp.Repo
 ## A complete action
 
 ```elixir
-defmodule MyApp.Projects.CreateProject do
+defmodule MyApp.Projects.Actions.CreateProject do
   use Enact.Action
 
   @impl Enact.Action
-  def input, do: MyApp.Inputs.ProjectInput
+  def input, do: MyApp.Projects.Inputs.ProjectInput
 
   @impl Enact.Action
   def authorize(ctx), do: MyApp.Policy.can?(ctx.actor, :create_project)
@@ -76,7 +76,7 @@ The actor is always explicit and required — `actor: nil` raises, and every wri
 Inputs are embedded-schema modules implementing the `Enact.InputSchema` behaviour — `changeset/3` heads per mode, a `fields/1` introspection manifest, and (for patch-mode use) a `from_subject/1` projection that lets `validate_required` and cross-field `get_field/2` rules work unmodified on PATCH:
 
 ```elixir
-defmodule MyApp.Inputs.ProjectInput do
+defmodule MyApp.Projects.Inputs.ProjectInput do
   use Ecto.Schema
   import Ecto.Changeset
 
@@ -145,6 +145,9 @@ The runner emits `[:enact, :action, :success]`, `[:enact, :action, :error]`, and
 
 `Enact.Test` ships `assert_invalid/2`, `build_ctx/1`, and `errors_on/1` so host apps don't reinvent them.
 
-## Design
+## Documentation
 
-The full design specification — including the rationale for every decision — lives in [spec.md](spec.md).
+- [Usage Rules](usage-rules.md) — the condensed do's and don'ts for writing actions; sync it into your agent instructions (CLAUDE.md / AGENTS.md) with [usage_rules](https://hex.pm/packages/usage_rules)
+- [Phoenix Integration](guides/phoenix-integration.md) — actor/scope wiring, the reference FallbackController and error renderer, background jobs, telemetry
+- [Testing Host Applications](guides/testing.md) — copy-paste templates for the five host-side test obligations (cross-tenant sweep, PATCH/create matrices, projection completeness, resolver coverage, guardrails in CI)
+- [Design Specification](spec.md) — the authoritative design, including the rationale for every decision
