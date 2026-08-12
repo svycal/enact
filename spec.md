@@ -172,7 +172,9 @@ defmodule MyApp.Projects.Inputs.ProjectInput do
     field :priority, :integer
     # public-facing ID; resolved later
     field :owner_id, :string
-    embeds_many :milestones, Milestone
+    # __MODULE__-qualified: the nested module is defined below, and a bare
+    # alias would resolve before its defmodule registers it
+    embeds_many :milestones, __MODULE__.Milestone
   end
 
   @all ~w(name slug priority owner_id)a

@@ -105,3 +105,7 @@ Omitted key → untouched. Explicit `null` → clears the scalar. Array key pres
 
 - `import Enact.Test` for `assert_invalid/2`, `build_ctx/1`, `errors_on/1`.
 - Host apps own five test obligations per the design spec: guardrails-in-CI, the cross-tenant sweep, the PATCH/create matrices, projection completeness, and resolver coverage. See the "Testing Host Applications" guide for templates.
+
+## Worked examples
+
+End-to-end samples following these conventions — embedded data with batch resolution, flattening embeds into columns, reading resolver assigns in execute, MCP dry-run confirmation flows — live in the Recipes guide (`guides/recipes.md`).
