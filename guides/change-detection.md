@@ -41,7 +41,9 @@ changeset
 |> Map.take(provided)
 ```
 
-Key selection is **presence-in-params intersected with the mode's castable fields** — not the change list. Values come from `apply_changes/1`, with embed structs dumped to plain, atom-keyed maps (schema-driven, so scalar structs like `Date` and `Decimal` pass through intact) — the updates map feeds persistence changesets and JSON encoders directly. This yields a small theorem that carries all the PATCH fidelity:
+Key selection is **presence-in-params intersected with the mode's castable fields** — not the change list. Values come from `apply_changes/1`, with embed structs dumped to plain, atom-keyed maps (schema-driven, so scalar structs like `Date` and `Decimal` pass through intact) — the updates map feeds persistence changesets and JSON encoders directly.
+
+A note on keys: the updates map is **uniformly atom-keyed at every level**, and every atom originates from a schema definition. Client params never mint atoms — `provided?/2` matches string keys by rendering the schema atom *to* a string, and cast drops unknown keys — so the atom space stays closed no matter what the caller sends. (When feeding the map onward, remember Ecto's one rule: don't mix string-keyed entries into it.) This yields a small theorem that carries all the PATCH fidelity:
 
 > For any provided key, either a change exists (you get the casted value), or no change exists *because the provided value equals the base* — in which case `apply_changes` yields that same value anyway. Either way, the updates map contains exactly what the caller said.
 

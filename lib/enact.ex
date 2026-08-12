@@ -174,6 +174,12 @@ defmodule Enact do
   schema-driven; scalar structs like `Date` and `Decimal` stay intact),
   so the map feeds persistence changesets and JSON encoders directly.
 
+  The result is uniformly atom-keyed at every level, and the atoms come
+  from the schema definitions — never from client params (string keys in
+  params are matched by presence, not converted), so the atom space stays
+  closed regardless of input. `Ecto.Changeset.cast` accepts the map
+  as-is; just don't merge string-keyed entries into it.
+
   Never use bare `apply_changes/1` output for persistence — it erases
   omitted-vs-provided. For `input: nil` actions this returns `%{}`.
   """
