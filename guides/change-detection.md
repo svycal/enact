@@ -66,7 +66,9 @@ Do not use bare `apply_changes/1` output for persistence. The full struct does n
 
 **`force_changes:`** exists for designs that extract from the change list, where a value provided identical to the current one records no change and is dropped from the write. Enact's extraction does not read the change list, so this option is not needed.
 
-**`empty_values:`** remains available, but it is a host decision. The runner never calls `cast/3`; the input module's changeset heads do. Ecto's default treats `""` and whitespace-only strings as empty, so `"name": ""` behaves like an explicit nil-clear: present in updates as `nil`, failing `validate_required` on required fields. To distinguish `""` from `null`, pass `empty_values: []` in the relevant `cast` calls.
+**`empty_values:`** remains available, but it is a host decision. The runner never calls `cast/3`; the input module's changeset heads do. Ecto's default treats `""` and whitespace-only strings as empty on every field type, so `"name": ""` behaves like an explicit nil-clear — and `"count": ""` on an integer field silently becomes a null-clear instead of a type error.
+
+`Enact.InputSchema.cast_input/4` packages the recommended JSON API policy so this does not have to be configured per cast call. It derives empty-string handling from each field's type: `""` on a non-string field is a cast error (`"is invalid"`); `:string` values are trimmed, then empty coalesces to `nil`. Two options declare the exceptions: `keep_empty_strings:` for fields where `""` is a value, and `trim_except:` for fields where whitespace is significant. `Enact.Test.assert_rejects_empty_strings/3` verifies the non-string outcome in CI regardless of which casting mechanism a module uses.
 
 ### Column convention
 
@@ -76,7 +78,7 @@ The default cast behavior is correct when optional scalar columns are nullable w
 - Explicit `null` is a clear, which is what Enact's nil-clear semantics express. No null-rejection rules are needed.
 - Omission leaves the column `NULL`. Storage `NULL`, `ctx.subject` values, and JSON `null` are the same value, so serializers do not translate on reads.
 
-`NOT NULL DEFAULT ''` columns conflict with this behavior. On such columns `""` is a valid value, but the default cast converts it to `nil`, which then violates the NOT NULL constraint at persistence. If you cannot migrate the column to nullable, treat it as a declared exception: cast those fields with `empty_values: []`, normalize whitespace explicitly, declare the fields in a module attribute, and add a host test asserting that `""` survives casting. The qualifying fields are mechanically derivable — any persistence field whose struct default is `""`. See the Testing guide for the test template and the Recipes guide for a worked example. Use this pattern only for fields where the empty string is meaningful as distinct from absent.
+`NOT NULL DEFAULT ''` columns conflict with this behavior. On such columns `""` is a valid value, but the default cast converts it to `nil`, which then violates the NOT NULL constraint at persistence. If you cannot migrate the column to nullable, declare the exception: list those fields in `cast_input/4`'s `keep_empty_strings:` option, and add a host test asserting that `""` survives casting. The qualifying fields are mechanically derivable — any persistence field whose struct default is `""`. See the Testing guide for the test template and the Recipes guide for a worked example. Use this pattern only for fields where the empty string is meaningful as distinct from absent.
 
 ## Where change-gating exists
 

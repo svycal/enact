@@ -29,6 +29,7 @@ defmodule EnactTest.ProjectInput do
   @moduledoc "A fixture top-level input schema shared by create and patch."
   use Ecto.Schema
   import Ecto.Changeset
+  import Enact.InputSchema, only: [cast_input: 3]
 
   @behaviour Enact.InputSchema
 
@@ -49,7 +50,7 @@ defmodule EnactTest.ProjectInput do
   @impl Enact.InputSchema
   def changeset(base, params, :create) do
     base
-    |> cast(params, @scalars)
+    |> cast_input(params, @scalars)
     |> validate_required(@required)
     |> cast_embed(:milestones)
     |> base_validations()
@@ -57,7 +58,7 @@ defmodule EnactTest.ProjectInput do
 
   def changeset(base, params, :patch) do
     base
-    |> cast(params, @patch_scalars)
+    |> cast_input(params, @patch_scalars)
     |> validate_required(@required)
     |> cast_embed(:milestones)
     |> base_validations()

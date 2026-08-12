@@ -261,10 +261,25 @@ test "empty-string-at-rest fields survive input casting" do
 
     assert Ecto.Changeset.get_field(changeset, field) == "",
            "#{inspect(input)} coalesced \"\" to nil for #{inspect(field)} — " <>
-             "cast it with empty_values: [] (see the Change Detection guide)"
+             "list it in cast_input/4's keep_empty_strings: option"
   end
 end
 ```
+
+## 9. Empty-string strictness
+
+Ecto's default cast silently coerces `""` to `nil` on every field type. On non-string fields that turns malformed input into a null-clear instruction instead of a cast error. `Enact.Test.assert_rejects_empty_strings/3` probes each non-string castable field with `""` and fails unless the module reports a cast error:
+
+```elixir
+test "non-string fields reject empty strings" do
+  for action <- MyApp.Actions.all(), input = action.input(), input != nil do
+    mode = Keyword.get(action.config(), :mode, :create)
+    assert_rejects_empty_strings(input, mode)
+  end
+end
+```
+
+The probe checks behavior, not mechanism: it passes for modules using `Enact.InputSchema.cast_input/4` and for modules using stock `cast` with `empty_values: []`. Pass `except:` for fields whose custom types accept `""` deliberately.
 
 ## Dry-run additions
 

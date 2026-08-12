@@ -57,6 +57,13 @@ defmodule Enact.InputSchema do
   they do not declare this behaviour. If an item schema is later promoted
   to a top-level input for some action, it gains a `changeset/3` alongside
   its `changeset/2` — same module, both contracts, no conflict.
+
+  ## Casting
+
+  `cast_input/4`, defined on this module and imported by input modules, is
+  the casting entry for scalar fields: `Ecto.Changeset.cast/4` with JSON
+  API empty-string semantics derived from field types. See its
+  documentation for the exact behavior table.
   """
 
   @callback changeset(base :: struct(), params :: map(), mode :: atom()) :: Ecto.Changeset.t()
@@ -64,4 +71,135 @@ defmodule Enact.InputSchema do
   @callback from_subject(subject :: struct()) :: struct()
 
   @optional_callbacks from_subject: 1
+
+  @doc """
+  Casts scalar params with JSON API semantics.
+
+  A replacement for `Ecto.Changeset.cast/4` in input-module changeset
+  heads. Ecto's stock cast implements HTML-form semantics: `""` on any
+  field means "no value" and silently becomes `nil`, regardless of field
+  type. `cast_input/4` derives empty-string handling from each field's
+  schema type instead:
+
+  | Input            | Non-string field         | `:string` field       | `:string` in `keep_empty_strings:` |
+  | ---------------- | ------------------------ | --------------------- | ---------------------------------- |
+  | `"5"`, `"true"`  | coerced via `Ecto.Type`  | value, trimmed        | value, trimmed                     |
+  | `""`, `"   "`    | `"is invalid"` error     | `nil` (empty → clear) | `""` (empty is a value)            |
+  | `null`           | `nil`                    | `nil`                 | `nil`                              |
+  | omitted          | untouched                | untouched             | untouched                          |
+
+  Options (a closed set — anything else raises):
+
+    * `:keep_empty_strings` — `:string` fields whose empty disposition is
+      `""` rather than `nil`, for `NOT NULL DEFAULT ''` columns where the
+      empty string is a value
+    * `:trim_except` — `:string` fields whose whitespace is significant
+      (passwords, for example); these are not trimmed, and only a literal
+      `""` counts as empty for them
+
+  Normalization applies only to fields whose schema type is literally
+  `:string` and whose param value is a binary; custom types receive the
+  raw value and apply their own `cast/1`. `:binary` fields are never
+  trimmed and keep `""` as a value (it is a valid binary). Embed fields
+  are not accepted — cast them with `Ecto.Changeset.cast_embed/3` as
+  usual. Presence semantics are unchanged: normalization rewrites values,
+  never adds or removes keys, so an empty string coalescing to `nil`
+  still records a presence-visible nil-clear.
+
+  Required-ness, defaults, and null-rejection are out of scope; they stay
+  in changeset heads, DB columns, and action `validate/2` respectively.
+  `Enact.Test.assert_rejects_empty_strings/3` verifies the empty-string
+  outcome regardless of whether a module uses `cast_input/4` or a stock
+  `cast` with `empty_values: []`.
+  """
+  @spec cast_input(struct() | Ecto.Changeset.t(), map(), [atom()], keyword()) ::
+          Ecto.Changeset.t()
+  def cast_input(base_or_changeset, params, fields, opts \\ [])
+      when is_map(params) and is_list(fields) do
+    opts = Keyword.validate!(opts, keep_empty_strings: [], trim_except: [])
+    keep_empty = opts[:keep_empty_strings]
+    trim_except = opts[:trim_except]
+
+    module = schema_module!(base_or_changeset)
+    validate_string_fields!(keep_empty, ":keep_empty_strings", module, fields)
+    validate_string_fields!(trim_except, ":trim_except", module, fields)
+
+    params = normalize_strings(params, module, fields, keep_empty, trim_except)
+
+    Ecto.Changeset.cast(base_or_changeset, params, fields, empty_values: [])
+  end
+
+  defp schema_module!(%Ecto.Changeset{data: %module{}}), do: ensure_schema!(module)
+
+  defp schema_module!(%Ecto.Changeset{} = changeset) do
+    raise ArgumentError,
+          "cast_input/4 requires a changeset over an input-schema struct; " <>
+            "schemaless changesets are not supported (got data: #{inspect(changeset.data)})"
+  end
+
+  defp schema_module!(%module{}), do: ensure_schema!(module)
+
+  defp schema_module!(other) do
+    raise ArgumentError,
+          "cast_input/4 expects an input-schema struct or changeset; got: #{inspect(other)}"
+  end
+
+  defp ensure_schema!(module) do
+    unless function_exported?(module, :__schema__, 2) do
+      raise ArgumentError,
+            "cast_input/4 expects an Ecto embedded schema; #{inspect(module)} is not one"
+    end
+
+    module
+  end
+
+  defp validate_string_fields!(list, opt_name, module, fields) do
+    Enum.each(list, fn field ->
+      cond do
+        field not in fields ->
+          raise ArgumentError,
+                "#{opt_name} lists #{inspect(field)}, which is not in the cast field list"
+
+        module.__schema__(:type, field) != :string ->
+          raise ArgumentError,
+                "#{opt_name} lists #{inspect(field)}, which is not a :string field on " <>
+                  inspect(module)
+
+        true ->
+          :ok
+      end
+    end)
+  end
+
+  defp normalize_strings(params, module, fields, keep_empty, trim_except) do
+    Enum.reduce(fields, params, fn field, params ->
+      with :string <- module.__schema__(:type, field),
+           {:ok, key, value} <- fetch_param(params, field),
+           true <- is_binary(value) do
+        Map.put(params, key, normalize_string(value, field, keep_empty, trim_except))
+      else
+        _ -> params
+      end
+    end)
+  end
+
+  defp fetch_param(params, field) do
+    string_key = Atom.to_string(field)
+
+    cond do
+      Map.has_key?(params, field) -> {:ok, field, Map.get(params, field)}
+      Map.has_key?(params, string_key) -> {:ok, string_key, Map.get(params, string_key)}
+      true -> :error
+    end
+  end
+
+  defp normalize_string(value, field, keep_empty, trim_except) do
+    value = if field in trim_except, do: value, else: String.trim(value)
+
+    cond do
+      value != "" -> value
+      field in keep_empty -> ""
+      true -> nil
+    end
+  end
 end

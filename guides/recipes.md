@@ -33,6 +33,7 @@ end
 defmodule MyApp.Orders.Inputs.OrderInput do
   use Ecto.Schema
   import Ecto.Changeset
+  import Enact.InputSchema, only: [cast_input: 3]
 
   @behaviour Enact.InputSchema
 
@@ -45,7 +46,7 @@ defmodule MyApp.Orders.Inputs.OrderInput do
   @impl Enact.InputSchema
   def changeset(base, params, :create) do
     base
-    |> cast(params, [:note])
+    |> cast_input(params, [:note])
     |> cast_embed(:items, required: true)
   end
 
@@ -265,14 +266,14 @@ The full pipeline runs again on confirm — authorization, validation, resolutio
 
 ## 5. Empty-string-at-rest columns
 
-Most optional text should be nullable at rest, with `NULL` as the single representation of empty; those fields need none of the following (see the column convention in the Change Detection guide). On a `NOT NULL DEFAULT ''` column, however, `""` is a valid value, and Ecto's default cast converts it to `nil`, which violates the NOT NULL constraint at persistence. The pattern: declare the exception, preserve empties at the cast, normalize whitespace explicitly, and reject explicit null in the action.
+Most optional text should be nullable at rest, with `NULL` as the single representation of empty; those fields need none of the following (see the column convention in the Change Detection guide). On a `NOT NULL DEFAULT ''` column, however, `""` is a valid value, and default cast behavior converts it to `nil`, which violates the NOT NULL constraint at persistence. The pattern: declare the exception in `cast_input/4`'s `keep_empty_strings:` option, and reject explicit null in the action.
 
 ```elixir
 # lib/my_app/customers/inputs/customer_input.ex
 defmodule MyApp.Customers.Inputs.CustomerInput do
   use Ecto.Schema
   import Ecto.Changeset
-  import MyApp.InputHelpers
+  import Enact.InputSchema, only: [cast_input: 4]
 
   @behaviour Enact.InputSchema
 
@@ -294,35 +295,16 @@ defmodule MyApp.Customers.Inputs.CustomerInput do
   @impl Enact.InputSchema
   def changeset(base, params, :create) do
     base
-    |> cast(params, @scalars -- @empty_string_text)
-    |> cast(params, @empty_string_text, empty_values: [])
-    |> trim_strings(@empty_string_text)
+    |> cast_input(params, @scalars, keep_empty_strings: @empty_string_text)
     |> validate_required(@required)
   end
 
-  # the :patch head applies the same casts; from_subject/1 projects the
+  # the :patch head applies the same cast; from_subject/1 projects the
   # stored value (possibly "") like any other scalar
 end
 ```
 
-```elixir
-# lib/my_app/input_helpers.ex — host-owned: generic Ecto, nothing
-# Enact-specific, imported by input modules that need it
-defmodule MyApp.InputHelpers do
-  import Ecto.Changeset
-
-  # update_change only fires on recorded changes, and the change value can
-  # be nil (an explicit null on patch) — guard it
-  def trim_strings(changeset, fields) do
-    Enum.reduce(fields, changeset, fn field, changeset ->
-      update_change(changeset, field, fn
-        nil -> nil
-        value -> String.trim(value)
-      end)
-    end)
-  end
-end
-```
+`cast_input/4` handles the whitespace normalization: `"   "` trims to `""`, which the `keep_empty_strings:` disposition keeps as the value rather than coalescing to `nil`.
 
 Explicit null is the remaining case. The field must never be null but may be blank, which `validate_required` cannot express: it rejects both `nil` and blank strings. Only presence distinguishes "omitted" (allowed — the column default applies) from "explicit null" (an error), so the rule lives in the action's `validate/2`:
 

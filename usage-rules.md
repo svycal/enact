@@ -73,12 +73,13 @@ end
 ## Input schemas
 
 - An input module is a plain `use Ecto.Schema` + `embedded_schema` module declaring `@behaviour Enact.InputSchema`, implementing `changeset/3` (one head per mode), `fields/1`, and — iff any patch-mode action uses it — `from_subject/1`.
+- Cast scalar fields with `cast_input/4` (import `Enact.InputSchema`), not stock `cast`: it derives empty-string handling from field types — `""` on a non-string field is a cast error instead of a silently-coerced `nil`; `:string` values are trimmed, then empty coalesces to `nil`. Options: `keep_empty_strings:` for `NOT NULL DEFAULT ''` columns, `trim_except:` for significant whitespace (passwords). Cast embeds with `cast_embed/3` as usual.
 - `@primary_key false` at **every** nesting level. No `default:` on any field. No associations — embeds only. (`Enact.Guardrails` raises on all three at first run.)
 - Required-ness lives in the changeset heads via `validate_required`, never in the schema. Per-mode differences are expressed as data (cast lists, required lists) — if you need conditionals inside the changeset heads, split into separate input modules.
 - `fields/1` must list the mode's castable fields **including embed names** — `Enact.updates/2` and the host test suite read it.
 - Nested item schemas implement Ecto's native `changeset/2` (invoked by `cast_embed`) and do **not** declare the behaviour. This asymmetry is deliberate.
 - `from_subject/1` is an explicit projection of the subject into the input vocabulary (public-id rendering, renames), total over scalar fields. Never seed embeds — leave them at structural defaults. Never implement it as a blind `Map.take`.
-- Pair with the data-layer convention: optional scalar columns are **nullable with no default** — `NULL` is the single representation of empty, so stock `cast` behavior (empty strings coalesce to `nil`) is correct and an explicit `null` is just a clear. Reserve `NOT NULL DEFAULT ''` for fields where `""` is genuinely meaningful as distinct from absent; those need `""`-preserving casts (`empty_values: []`) — see the Change Detection guide.
+- Pair with the data-layer convention: optional scalar columns are **nullable with no default** — `NULL` is the single representation of empty, so empty strings coalescing to `nil` is correct and an explicit `null` is just a clear. Reserve `NOT NULL DEFAULT ''` for fields where `""` is genuinely meaningful as distinct from absent; list those in `cast_input/4`'s `keep_empty_strings:` — see the Change Detection guide.
 
 ## Validation
 

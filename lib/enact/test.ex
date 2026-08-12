@@ -63,6 +63,55 @@ defmodule Enact.Test do
   end
 
   @doc """
+  Asserts that an input module rejects `""` on every non-string castable
+  field for the given mode.
+
+  Ecto's default cast silently coerces `""` to `nil` on any field type.
+  For non-string fields that turns malformed input into a null-clear
+  instruction instead of a cast error. This probe calls
+  `module.changeset/3` with `""` for each non-string scalar field in
+  `fields(mode)` and fails unless the field carries a cast error —
+  regardless of whether the module uses `Enact.InputSchema.cast_input/4`
+  or a stock `cast` with `empty_values: []`.
+
+  Probing is safe because input modules are dependency-free by contract
+  (no ctx, no repo). Errors on other fields (for example
+  `validate_required`) are ignored; only the probed field's cast outcome
+  is checked. `:string` and `:binary` fields are skipped, since `""` is a
+  valid value for both. A rejection counts when the probed field carries a
+  `:cast` error (regular and custom types) or an `:inclusion` error
+  (`Ecto.Enum` rejects `""` with `validation: :inclusion`).
+
+  Options: `:except` — fields whose custom types accept `""` deliberately.
+  """
+  @spec assert_rejects_empty_strings(module(), atom(), keyword()) :: :ok
+  def assert_rejects_empty_strings(module, mode, opts \\ []) do
+    except = Keyword.get(opts, :except, [])
+    embeds = module.__schema__(:embeds)
+
+    for field <- module.fields(mode) -- embeds,
+        field not in except,
+        module.__schema__(:type, field) not in [:string, :binary] do
+      changeset = module.changeset(struct(module), %{Atom.to_string(field) => ""}, mode)
+
+      rejected? =
+        changeset.errors
+        |> Keyword.get_values(field)
+        |> Enum.any?(fn {_message, meta} -> meta[:validation] in [:cast, :inclusion] end)
+
+      unless rejected? do
+        raise ExUnit.AssertionError,
+          message:
+            "#{inspect(module)} silently coerced \"\" on #{inspect(field)} " <>
+              "(#{inspect(mode)}) — cast non-string fields with " <>
+              "Enact.InputSchema.cast_input/4 or empty_values: []"
+      end
+    end
+
+    :ok
+  end
+
+  @doc """
   Flattens a changeset's errors into a map of field → messages, with
   nested embed errors as per-index lists of maps — the conventional
   `errors_on` helper, shipped so host apps don't reinvent it.
