@@ -100,11 +100,20 @@ defmodule Enact.InputSchema do
   Normalization applies only to fields whose schema type is literally
   `:string` and whose param value is a binary; custom types receive the
   raw value and apply their own `cast/1`. `:binary` fields are never
-  trimmed and keep `""` as a value (it is a valid binary). Embed fields
-  are not accepted — cast them with `Ecto.Changeset.cast_embed/3` as
-  usual. Presence semantics are unchanged: normalization rewrites values,
-  never adds or removes keys, so an empty string coalescing to `nil`
-  still records a presence-visible nil-clear.
+  trimmed and keep `""` as a value (it is a valid binary). Array fields
+  are untouched: elements are neither trimmed, coalesced, nor dropped —
+  a `""` element in an `{:array, :string}` field passes through, so
+  validate against empty elements where they matter. Embed fields are not
+  accepted — cast them with `Ecto.Changeset.cast_embed/3` as usual.
+  Presence semantics are unchanged: normalization rewrites values, never
+  adds or removes keys, so an empty string coalescing to `nil` still
+  records a presence-visible nil-clear.
+
+  Because `validate_required/2` consults the cast's `empty_values`, a
+  literal `""` value satisfies required-ness after `cast_input/4`. For
+  plain `:string` fields this changes nothing (empties are already `nil`
+  before validation); for `keep_empty_strings:` fields it means
+  `validate_required` expresses "never nil, `""` allowed".
 
   Required-ness, defaults, and null-rejection are out of scope; they stay
   in changeset heads, DB columns, and action `validate/2` respectively.

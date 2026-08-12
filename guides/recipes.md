@@ -284,8 +284,8 @@ defmodule MyApp.Customers.Inputs.CustomerInput do
   end
 
   @scalars ~w(name summary)a
-  # summary is not in @required: validate_required treats "" as blank,
-  # but "" is a valid value for this field
+  # summary is not in @required: on create, omission must be allowed so
+  # the column default applies, and validate_required would reject it
   @required ~w(name)a
 
   # NOT NULL DEFAULT '' columns: "" is a value, so empties must survive
