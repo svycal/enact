@@ -93,9 +93,8 @@ Inputs are embedded-schema modules implementing the `Enact.InputSchema` behaviou
 ```elixir
 defmodule MyApp.Projects.Inputs.ProjectInput do
   use Ecto.Schema
+  use Enact.InputSchema
   import Ecto.Changeset
-
-  @behaviour Enact.InputSchema
 
   @primary_key false
   embedded_schema do
@@ -113,13 +112,13 @@ defmodule MyApp.Projects.Inputs.ProjectInput do
   @impl Enact.InputSchema
   def changeset(base, params, :create) do
     base
-    |> cast(params, @all)
+    |> cast_input(params, @all)
     |> validate_required(@required)
   end
 
   def changeset(base, params, :patch) do
     base
-    |> cast(params, @patch)
+    |> cast_input(params, @patch)
     |> validate_required(@required)
   end
 

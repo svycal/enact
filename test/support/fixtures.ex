@@ -28,10 +28,8 @@ end
 defmodule EnactTest.ProjectInput do
   @moduledoc "A fixture top-level input schema shared by create and patch."
   use Ecto.Schema
+  use Enact.InputSchema
   import Ecto.Changeset
-  import Enact.InputSchema, only: [cast_input: 3]
-
-  @behaviour Enact.InputSchema
 
   @primary_key false
   embedded_schema do

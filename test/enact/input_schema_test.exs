@@ -6,10 +6,7 @@ defmodule Enact.InputSchemaTest do
 
   defmodule Input do
     use Ecto.Schema
-    import Ecto.Changeset, only: []
-    import Enact.InputSchema
-
-    @behaviour Enact.InputSchema
+    use Enact.InputSchema
 
     @primary_key false
     embedded_schema do

@@ -1,7 +1,11 @@
 defmodule Enact.InputSchema do
   @moduledoc """
   The contract for top-level input-schema modules — plain Ecto embedded
-  schemas that declare `@behaviour Enact.InputSchema` (no `use` macro).
+  schemas that adopt this behaviour via `use Enact.InputSchema`, which
+  sets `@behaviour` and imports `cast_input/4` and nothing more.
+  `use Ecto.Schema`, `import Ecto.Changeset`, and `@primary_key false`
+  stay explicit in the module. Plain `@behaviour` + `import` remains
+  equivalent.
 
   ## The callbacks
 
@@ -71,6 +75,22 @@ defmodule Enact.InputSchema do
   @callback from_subject(subject :: struct()) :: struct()
 
   @optional_callbacks from_subject: 1
+
+  @doc """
+  Adopts the contract. Expands to exactly:
+
+      @behaviour Enact.InputSchema
+      import Enact.InputSchema, only: [cast_input: 3, cast_input: 4]
+
+  and will never inject more — `use Ecto.Schema`, `import Ecto.Changeset`,
+  and `@primary_key false` stay explicit in the module.
+  """
+  defmacro __using__(_opts) do
+    quote do
+      @behaviour Enact.InputSchema
+      import Enact.InputSchema, only: [cast_input: 3, cast_input: 4]
+    end
+  end
 
   @doc """
   Casts scalar params with JSON API semantics.

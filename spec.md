@@ -145,7 +145,7 @@ defmodule Enact.InputSchema do
 end
 ```
 
-- **No `use` macro** — input modules add `@behaviour Enact.InputSchema` for compile-time signature warnings and dialyzer coverage. The behaviour module's moduledoc is the canonical home for base semantics (why the base exists, what `from_subject/1` must guarantee, why no defaults).
+- **`use Enact.InputSchema`** adopts the contract: it sets `@behaviour Enact.InputSchema` (compile-time signature warnings, dialyzer coverage) and imports `cast_input/4` — exactly that, never more. `use Ecto.Schema`, `import Ecto.Changeset`, and `@primary_key false` stay explicit. The general rule: Enact's two behaviours are adopted via `use`, and each `use` sets the behaviour and exposes that module's own functions, nothing else. Plain `@behaviour` + `import` remains equivalent — guardrails and tests check exports, not the adoption mechanism. The behaviour module's moduledoc is the canonical home for base semantics (why the base exists, what `from_subject/1` must guarantee, why no defaults).
 - **Mode provenance:** the runner passes `config[:mode]` verbatim as the third argument. The union is closed to `:create | :patch` (matching `Context.mode` and the `config/0` docs). A future custom mode (§13) is mostly an additional `changeset/3` head, plus a declaration (e.g. via config) of whether it bases like create (empty struct) or patch (`from_subject/1`) for the runner's §5.1 branch.
 - **`fields/1` is part of the contract**, not just test sugar: it is the introspection surface for mode-specific castable fields (`__schema__(:fields)` cannot distinguish create-castable from patch-castable). `updates/2` key selection (§5.2) and the reconciliation and resolver-coverage tests (§10) read it.
 - **`from_subject/1` builds the patch-mode validation base** (§5.3): an explicit, total projection of the subject into the input representation. Required whenever a patch-mode action uses the module; create-only modules may omit it.
@@ -160,11 +160,9 @@ Field definitions are written once; per-mode deltas are expressed as data (cast 
 ```elixir
 defmodule MyApp.Projects.Inputs.ProjectInput do
   use Ecto.Schema
+  # sets @behaviour and imports cast_input (§4.1)
+  use Enact.InputSchema
   import Ecto.Changeset
-  import Enact.InputSchema, only: [cast_input: 3]
-
-  # top-level input modules declare the contract (§4.1)
-  @behaviour Enact.InputSchema
 
   @primary_key false
   embedded_schema do

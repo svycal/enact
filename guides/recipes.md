@@ -32,10 +32,8 @@ end
 # lib/my_app/orders/inputs/order_input.ex
 defmodule MyApp.Orders.Inputs.OrderInput do
   use Ecto.Schema
+  use Enact.InputSchema
   import Ecto.Changeset
-  import Enact.InputSchema, only: [cast_input: 3]
-
-  @behaviour Enact.InputSchema
 
   @primary_key false
   embedded_schema do
@@ -272,10 +270,8 @@ Most optional text should be nullable at rest, with `NULL` as the single represe
 # lib/my_app/customers/inputs/customer_input.ex
 defmodule MyApp.Customers.Inputs.CustomerInput do
   use Ecto.Schema
+  use Enact.InputSchema
   import Ecto.Changeset
-  import Enact.InputSchema, only: [cast_input: 4]
-
-  @behaviour Enact.InputSchema
 
   @primary_key false
   embedded_schema do
