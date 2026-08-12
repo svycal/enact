@@ -21,7 +21,7 @@ defmodule Enact.InputSchema do
   extraction (`Enact.updates/2`) ignores the changeset's diff entirely and
   keys off presence in raw params. (The system-level walkthrough of how
   base, cast, presence, and extraction interact lives in the
-  [Change Detection & PATCH Semantics](change-detection.html) guide.)
+  [Change Detection](change-detection.html) guide.)
 
   In create mode the base is the empty struct. In patch mode it is
   `from_subject(ctx.subject)` — an explicit, total projection of the loaded

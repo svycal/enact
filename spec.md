@@ -418,6 +418,7 @@ Invocation: memoized first-`run` check, **plus** a CI test that calls it on ever
 1. `load/2` and every fetcher must scope by a trust anchor — the actor/tenant when authenticated; a public-by-construction subject for `anonymous?: true` actions (§2.4).
 2. Fetchers check the trust anchor first and emit precise error messages only about records the anchor-scoped query returned (§7).
 3. Writes go through `Enact.run` — no direct-Repo context functions (social + optional Credo rule).
+4. Optional scalar columns are nullable with no default — `NULL` is the single representation of empty, aligning storage, `ctx.subject`, JSON `null`, and stock cast coalescing (the sibling of §4.3's "defaults live in the DB"). `NOT NULL DEFAULT ''` columns force `""` into the input domain and require per-field `""`-preserving casts; reserve them for fields where empty-string is genuinely distinct from absent.
 
 ## 10. Required tests (part of the definition of done)
 

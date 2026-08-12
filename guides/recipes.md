@@ -263,3 +263,79 @@ end
 ```
 
 The full pipeline re-runs on confirm — authorization, validation, resolution — so a digest match with changed world state still surfaces `:invalid`/`:not_found` normally; the digest only guards against the *change itself* drifting between preview and confirm (it binds action, mode, and the exact updates map). Both phases emit distinct telemetry, so audit trails count previews and executions separately.
+
+## 5. Empty-string-at-rest columns
+
+Most optional text should be nullable at rest — `NULL` as the single representation of empty — and needs none of this (see the column convention in the Change Detection guide). But a legacy `NOT NULL DEFAULT ''` column makes `""` a *legitimate value* that Ecto's default cast destroys: `""` coalesces to `nil`, which then violates NOT NULL at persistence. The pattern: declare the exception, preserve empties at the cast, normalize whitespace explicitly, and reject explicit null in the action.
+
+```elixir
+# lib/my_app/customers/inputs/customer_input.ex
+defmodule MyApp.Customers.Inputs.CustomerInput do
+  use Ecto.Schema
+  import Ecto.Changeset
+  import MyApp.InputHelpers
+
+  @behaviour Enact.InputSchema
+
+  @primary_key false
+  embedded_schema do
+    field :name, :string
+    field :summary, :string
+  end
+
+  @scalars ~w(name summary)a
+  # summary is deliberately NOT in @required: validate_required treats ""
+  # as blank, but "" is this field's legitimate value
+  @required ~w(name)a
+
+  # NOT NULL DEFAULT '' columns: "" is a value, so empties must survive
+  # casting instead of coalescing to nil
+  @empty_string_text ~w(summary)a
+
+  @impl Enact.InputSchema
+  def changeset(base, params, :create) do
+    base
+    |> cast(params, @scalars -- @empty_string_text)
+    |> cast(params, @empty_string_text, empty_values: [])
+    |> trim_strings(@empty_string_text)
+    |> validate_required(@required)
+  end
+
+  # the :patch head applies the same casts; from_subject/1 projects the
+  # stored value (possibly "") like any other scalar
+end
+```
+
+```elixir
+# lib/my_app/input_helpers.ex — host-owned: generic Ecto, nothing
+# Enact-specific, imported by input modules that need it
+defmodule MyApp.InputHelpers do
+  import Ecto.Changeset
+
+  # update_change only fires on recorded changes, and the change value can
+  # legitimately be nil (an explicit null on patch) — guard it
+  def trim_strings(changeset, fields) do
+    Enum.reduce(fields, changeset, fn field, changeset ->
+      update_change(changeset, field, fn
+        nil -> nil
+        value -> String.trim(value)
+      end)
+    end)
+  end
+end
+```
+
+Explicit null is the remaining case: this field is *never-null but blank-fine*, which is outside `validate_required`'s vocabulary (nil-or-blank). Only presence can distinguish "omitted" (fine — DB default applies) from "explicit null" (error), so the rule lives in the action's `validate/2`:
+
+```elixir
+@impl Enact.Action
+def validate(changeset, ctx) do
+  if Enact.provided?(ctx, :summary) and is_nil(get_field(changeset, :summary)) do
+    add_error(changeset, :summary, "can't be null")
+  else
+    changeset
+  end
+end
+```
+
+The cases then resolve as: `""` → persists `""`; `"   "` → trims to `""`; explicit `null` → 422 on `:summary`; omitted → untouched (create inserts fall to the column default). The drift test in the Testing guide catches any `""`-at-rest field someone wires with a plain cast.

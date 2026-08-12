@@ -51,7 +51,7 @@ defmodule Enact.MixProject do
       extras: [
         "README.md",
         "usage-rules.md": [title: "Usage Rules"],
-        "guides/change-detection.md": [title: "Change Detection & PATCH Semantics"],
+        "guides/change-detection.md": [title: "Change Detection"],
         "guides/phoenix-integration.md": [title: "Phoenix Integration"],
         "guides/recipes.md": [title: "Recipes"],
         "guides/testing.md": [title: "Testing Host Applications"],

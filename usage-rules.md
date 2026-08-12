@@ -78,6 +78,7 @@ end
 - `fields/1` must list the mode's castable fields **including embed names** — `Enact.updates/2` and the host test suite read it.
 - Nested item schemas implement Ecto's native `changeset/2` (invoked by `cast_embed`) and do **not** declare the behaviour. This asymmetry is deliberate.
 - `from_subject/1` is an explicit projection of the subject into the input vocabulary (public-id rendering, renames), total over scalar fields. Never seed embeds — leave them at structural defaults. Never implement it as a blind `Map.take`.
+- Pair with the data-layer convention: optional scalar columns are **nullable with no default** — `NULL` is the single representation of empty, so stock `cast` behavior (empty strings coalesce to `nil`) is correct and an explicit `null` is just a clear. Reserve `NOT NULL DEFAULT ''` for fields where `""` is genuinely meaningful as distinct from absent; those need `""`-preserving casts (`empty_values: []`) — see the Change Detection guide.
 
 ## Validation
 
@@ -108,4 +109,4 @@ Omitted key → untouched. Explicit `null` → clears the scalar. Array key pres
 
 ## Worked examples
 
-End-to-end samples following these conventions — embedded data with batch resolution, flattening embeds into columns, reading resolver assigns in execute, MCP dry-run confirmation flows — live in the Recipes guide (`guides/recipes.md`).
+End-to-end samples following these conventions — embedded data with batch resolution, flattening embeds into columns, reading resolver assigns in execute, MCP dry-run confirmation flows, empty-string-at-rest columns — live in the Recipes guide (`guides/recipes.md`).

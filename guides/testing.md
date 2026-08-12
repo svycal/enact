@@ -235,6 +235,36 @@ test "ProjectInput matches the documented request schema" do
 end
 ```
 
+## 8. Empty-string-at-rest drift
+
+Any persistence field whose struct default is `""` is an empty-string-at-rest column (`NOT NULL DEFAULT ''`) — its input cast must preserve `""` instead of coalescing it to `nil` (recipe 5 in the Recipes guide). This derives those fields mechanically and fails CI when one is wired with a plain cast:
+
+```elixir
+# {input module, persistence schema, mode} for every input casting such fields
+@empty_string_pairs [
+  {CustomerInput, Customer, :create},
+  {CustomerInput, Customer, :patch}
+]
+
+defp empty_string_fields(schema) do
+  for field <- schema.__schema__(:fields),
+      Map.get(struct(schema), field) == "",
+      do: field
+end
+
+test "empty-string-at-rest fields survive input casting" do
+  for {input, persistence, mode} <- @empty_string_pairs,
+      field <- empty_string_fields(persistence),
+      field in input.fields(mode) do
+    changeset = input.changeset(struct(input), %{Atom.to_string(field) => ""}, mode)
+
+    assert Ecto.Changeset.get_field(changeset, field) == "",
+           "#{inspect(input)} coalesced \"\" to nil for #{inspect(field)} — " <>
+             "cast it with empty_values: [] (see the Change Detection guide)"
+  end
+end
+```
+
 ## Dry-run additions
 
 For any action exposed through a confirmation flow: assert `dry_run` performs no writes, that `preview.updates` equals what an identical `run` persists, and that a mismatched or cross-action `confirm_digest` returns `:conflict`.

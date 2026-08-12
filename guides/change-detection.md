@@ -1,4 +1,4 @@
-# Change Detection and PATCH Semantics
+# Change Detection
 
 How Enact decides what a write contains — and why the usual Ecto PATCH workarounds (`force_changes:`, subject-fallback reads, manual merge logic) never appear in an Enact codebase.
 
@@ -66,7 +66,17 @@ Never use bare `apply_changes/1` output for persistence — the full struct eras
 
 **`force_changes:`** exists for change-based extraction designs, where a provided-identical value records no change and therefore vanishes from the write. Enact's extraction never reads the change list, so there is nothing to force — the provided-identical row in the table above is handled by presence.
 
-**`empty_values:`** is a live option, just not Enact's decision. The runner never calls `cast/3` — your input module's changeset heads do. Ecto's default treats `""` as empty, so `"name": ""` behaves like an explicit nil-clear (present in updates as `nil`, failing `validate_required` on required fields). A strict JSON API that wants `""` and `null` distinguished passes `empty_values: []` in its own `cast` calls, per input module.
+**`empty_values:`** is a live option, just not Enact's decision. The runner never calls `cast/3` — your input module's changeset heads do. Ecto's default treats `""` (and whitespace-only strings) as empty, so `"name": ""` behaves like an explicit nil-clear (present in updates as `nil`, failing `validate_required` on required fields). A strict JSON API that wants `""` and `null` distinguished passes `empty_values: []` in its own `cast` calls, per input module.
+
+### The column convention that keeps this simple
+
+The default cast behavior above is *correct* under one data-layer posture: **optional scalar columns are nullable with no default**, making `NULL` the single representation of empty. Then the whole stack agrees on what "empty" is:
+
+- Empty-ish input (`""`, `"   "`) coalesces to `nil` — the canonical empty — via stock cast; no options, no normalization helpers.
+- Explicit `null` is just a clear, which is exactly what Enact's nil-clear semantics express; no null-rejection rules.
+- Omission leaves the column at `NULL`; storage `NULL`, `ctx.subject` values, and JSON `null` are all the same value, so serializers translate nothing on the way out either.
+
+The pattern that fights this is the `NOT NULL DEFAULT ''` column (Rails-era discipline that solved the same two-representations problem from the other side, by banning `NULL` instead of `""`). There, `""` is a *legitimate value* that default casting destroys — `""` → `nil` → a NOT NULL violation at persistence. If such a column can't be migrated, treat it as the declared exception: cast those fields with `empty_values: []` plus explicit whitespace normalization, declare them in a module attribute so the policy is greppable, and back it with a host test asserting `""` survives casting (derivable mechanically — any persistence field whose struct default is `""` qualifies; template in the Testing guide, worked example in the Recipes guide). Reserve the pattern for fields where empty-string is genuinely distinct from absent; for everything else, migrate to nullable and delete the machinery.
 
 ## Where change-gating still legitimately exists
 
