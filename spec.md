@@ -151,7 +151,7 @@ end
 - **`from_subject/1` builds the patch-mode validation base** (§5.3): an explicit, total projection of the subject into the input representation. Required whenever a patch-mode action uses the module; create-only modules may omit it.
 - **Enforcement** is belt-and-suspenders: the behaviour annotation warns at compile time; the guardrails walk (§9) hard-checks `function_exported?(module, :changeset, 3)` and `fields/1` at first run / in CI, with teaching errors, for modules that skip the annotation.
 - **`cast_input/4`** (a function on the behaviour module, imported by input modules) is the casting entry for scalar fields: stock `cast` plus JSON-API empty-string semantics derived from field types. `""` on a non-string field is a cast error rather than a silently-coerced `nil` (Ecto's forms-era default); `:string` values are trimmed, then empty coalesces to `nil` — with `keep_empty_strings:` keeping `""` as the value for empty-string-at-rest columns and `trim_except:` exempting significant whitespace. The option set is closed; required-ness, embeds, defaults, and null-rejection stay where they otherwise live. Stock `cast` remains legal — `Enact.Test.assert_rejects_empty_strings/3` behaviorally verifies the empty-string outcome regardless of mechanism (probing is safe because input modules are dependency-free by contract).
-- **Deliberate asymmetry — nested item schemas use `changeset/2`.** Items (`Milestone` etc.) are invoked by `cast_embed`, not the runner, and are mode-blind: the parent's mode-specific cast list decides whether the embed is reachable at all. Item schemas follow Ecto's native `cast_embed` convention; top-level input modules follow Enact's `/3`. Do not "fix" this into a uniform arity. If an item schema is later promoted to a top-level input for some action (e.g. an "add one item" endpoint), it gains a `changeset/3` alongside its `changeset/2` — same module, both contracts, no conflict.
+- **Deliberate asymmetry — nested item schemas use `changeset/2`.** Items (`Milestone` etc.) are invoked by `cast_embed`, not the runner, and are mode-blind: the parent's mode-specific cast list decides whether the embed is reachable at all. Item schemas follow Ecto's native `cast_embed` convention; top-level input modules follow Enact's `/3`. Do not "fix" this into a uniform arity. Item schemas take the bare `import Enact.InputSchema` (no `use` — they don't adopt the behaviour) and still cast with `cast_input/4`; since items have no `fields/1` manifest, item-level empty-string strictness is a convention rather than a probed guarantee. If an item schema is later promoted to a top-level input for some action (e.g. an "add one item" endpoint), it gains a `changeset/3` alongside its `changeset/2` — same module, both contracts, no conflict.
 
 ### 4.2 Shared create/patch input modules
 
@@ -222,9 +222,11 @@ defmodule MyApp.Projects.Inputs.ProjectInput do
   defmodule Milestone do
     use Ecto.Schema
     import Ecto.Changeset
+    # NOTE: bare import, not `use` — item schemas are changeset/2, invoked
+    # by cast_embed, and exempt from the InputSchema contract (§4.1
+    # asymmetry); they still cast with cast_input for empty-string strictness
+    import Enact.InputSchema, only: [cast_input: 3]
 
-    # NOTE: no @behaviour — item schemas are changeset/2, invoked by
-    # cast_embed, and exempt from the InputSchema contract (§4.1 asymmetry)
     @primary_key false
     embedded_schema do
       field :title, :string
@@ -234,7 +236,7 @@ defmodule MyApp.Projects.Inputs.ProjectInput do
 
     def changeset(item, params) do
       item
-      |> cast(params, [:title, :due_on, :owner_id])
+      |> cast_input(params, [:title, :due_on, :owner_id])
       |> validate_required([:title])
     end
   end

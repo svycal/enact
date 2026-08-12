@@ -58,9 +58,12 @@ defmodule Enact.InputSchema do
 
   Deliberate asymmetry: nested item modules (invoked by `cast_embed`, not
   the runner) are mode-blind and implement Ecto's native `changeset/2` —
-  they do not declare this behaviour. If an item schema is later promoted
-  to a top-level input for some action, it gains a `changeset/3` alongside
-  its `changeset/2` — same module, both contracts, no conflict.
+  they do not adopt this behaviour. They take the bare
+  `import Enact.InputSchema` and still cast with `cast_input/4`, since
+  item fields have the same empty-string concerns as top-level fields. If
+  an item schema is later promoted to a top-level input for some action,
+  it gains a `changeset/3` alongside its `changeset/2` — same module,
+  both contracts, no conflict.
 
   ## Casting
 

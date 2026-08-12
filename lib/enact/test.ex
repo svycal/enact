@@ -86,6 +86,11 @@ defmodule Enact.Test do
   error is the footgun's own signature: `""` silently coerced to `nil`,
   then caught downstream.
 
+  Coverage is top-level only: item schemas have no `fields/1` manifest,
+  so their cast lists are not introspectable. Item-level strictness is a
+  convention — cast item fields with `cast_input/4` — rather than a
+  probed guarantee.
+
   Options: `:except` — fields whose custom types accept `""` deliberately.
   """
   @spec assert_rejects_empty_strings(module(), atom(), keyword()) :: :ok

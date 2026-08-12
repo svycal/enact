@@ -11,8 +11,10 @@ An order with line items: nested input casting, per-item validation, batch resol
 defmodule MyApp.Orders.Inputs.LineItemInput do
   use Ecto.Schema
   import Ecto.Changeset
+  # item schemas take the bare import — changeset/2 is invoked by
+  # cast_embed, so they do not adopt the behaviour via use
+  import Enact.InputSchema, only: [cast_input: 3]
 
-  # item schema: changeset/2, invoked by cast_embed — no @behaviour
   @primary_key false
   embedded_schema do
     field :product_id, :string
@@ -21,7 +23,7 @@ defmodule MyApp.Orders.Inputs.LineItemInput do
 
   def changeset(item, params) do
     item
-    |> cast(params, [:product_id, :quantity])
+    |> cast_input(params, [:product_id, :quantity])
     |> validate_required([:product_id, :quantity])
     |> validate_number(:quantity, greater_than: 0)
   end

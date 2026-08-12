@@ -10,6 +10,7 @@ defmodule EnactTest.MilestoneInput do
   """
   use Ecto.Schema
   import Ecto.Changeset
+  import Enact.InputSchema, only: [cast_input: 3]
 
   @primary_key false
   embedded_schema do
@@ -20,7 +21,7 @@ defmodule EnactTest.MilestoneInput do
 
   def changeset(item, params) do
     item
-    |> cast(params, [:title, :due_on, :owner_id])
+    |> cast_input(params, [:title, :due_on, :owner_id])
     |> validate_required([:title])
   end
 end

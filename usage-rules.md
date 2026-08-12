@@ -77,7 +77,7 @@ end
 - `@primary_key false` at **every** nesting level. No `default:` on any field. No associations — embeds only. (`Enact.Guardrails` raises on all three at first run.)
 - Required-ness lives in the changeset heads via `validate_required`, never in the schema. Per-mode differences are expressed as data (cast lists, required lists) — if you need conditionals inside the changeset heads, split into separate input modules.
 - `fields/1` must list the mode's castable fields **including embed names** — `Enact.updates/2` and the host test suite read it.
-- Nested item schemas implement Ecto's native `changeset/2` (invoked by `cast_embed`) and do **not** declare the behaviour. This asymmetry is deliberate.
+- Nested item schemas implement Ecto's native `changeset/2` (invoked by `cast_embed`) and do **not** adopt the behaviour — take the bare `import Enact.InputSchema` and still cast with `cast_input/4`. This asymmetry is deliberate. Note the strictness probe covers top-level fields only (item schemas have no `fields/1` manifest), so item-level strictness is a convention, not a probed guarantee.
 - `from_subject/1` is an explicit projection of the subject into the input vocabulary (public-id rendering, renames), total over scalar fields. Never seed embeds — leave them at structural defaults. Never implement it as a blind `Map.take`.
 - Pair with the data-layer convention: optional scalar columns are **nullable with no default** — `NULL` is the single representation of empty, so empty strings coalescing to `nil` is correct and an explicit `null` is just a clear. Reserve `NOT NULL DEFAULT ''` for fields where `""` is genuinely meaningful as distinct from absent; list those in `cast_input/4`'s `keep_empty_strings:` — see the Change Detection guide.
 
