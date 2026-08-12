@@ -114,9 +114,18 @@ defmodule Enact.InputSchemaTest do
       end
     end
 
-    test "options reject fields outside the cast list" do
-      assert_raise ArgumentError, ~r/not in the cast field list/, fn ->
-        cast_input(%Input{}, %{}, [:name], trim_except: [:password])
+    test "option fields outside this head's cast list are inert" do
+      # shared option attributes across mode heads with differing cast
+      # lists: the listed field simply isn't cast by this head
+      result = cast_input(%Input{}, %{"password" => " x "}, [:name], trim_except: [:password])
+
+      assert result.valid?
+      assert result.changes == %{}
+    end
+
+    test "options reject nonexistent fields" do
+      assert_raise ArgumentError, ~r/does not exist on/, fn ->
+        cast_input(%Input{}, %{}, [:name], trim_except: [:typo_field])
       end
     end
 

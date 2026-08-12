@@ -95,15 +95,71 @@ defmodule Enact.TestTest do
       @primary_key false
       embedded_schema do
         field :payload, :binary
+        field :ref, :binary_id
       end
 
-      # stock cast — but :binary is skipped, since "" is a valid binary
-      def changeset(base, params, :create), do: cast(base, params, [:payload])
-      def fields(:create), do: [:payload]
+      # stock cast — :binary and :binary_id are skipped: "" is a valid
+      # binary, and :binary_id's changeset-level cast accepts any binary
+      def changeset(base, params, :create), do: cast(base, params, [:payload, :ref])
+      def fields(:create), do: [:payload, :ref]
     end
 
-    test "binary fields are skipped (\"\" is a valid binary)" do
+    test "binary and binary_id fields are skipped" do
       assert assert_rejects_empty_strings(BinaryInput, :create) == :ok
+    end
+
+    defmodule CodeType do
+      use Ecto.Type
+
+      def type, do: :string
+      def cast(""), do: {:error, validation: :format, reason: :empty}
+      def cast(value) when is_binary(value), do: {:ok, value}
+      def cast(_other), do: :error
+      def dump(value), do: {:ok, value}
+      def load(value), do: {:ok, value}
+    end
+
+    defmodule CustomTagInput do
+      use Ecto.Schema
+      import Ecto.Changeset
+
+      @primary_key false
+      embedded_schema do
+        field :code, CodeType
+      end
+
+      # rejects "" with custom error metadata (validation: :format) —
+      # any non-:required error counts as strict; empty_values: [] is
+      # required for "" to reach the custom type's cast at all
+      def changeset(base, params, :create), do: cast(base, params, [:code], empty_values: [])
+      def fields(:create), do: [:code]
+    end
+
+    test "custom types rejecting with custom error metadata count as strict" do
+      assert assert_rejects_empty_strings(CustomTagInput, :create) == :ok
+    end
+
+    defmodule RequiredOnlyInput do
+      use Ecto.Schema
+      import Ecto.Changeset
+
+      @primary_key false
+      embedded_schema do
+        field :count, :integer
+      end
+
+      # silent coercion caught only by validate_required — still the footgun
+      def changeset(base, params, :create) do
+        base |> cast(params, [:count]) |> validate_required([:count])
+      end
+
+      def fields(:create), do: [:count]
+    end
+
+    test "a :required error alone still counts as silent coercion" do
+      assert_raise ExUnit.AssertionError, fn ->
+        assert_rejects_empty_strings(RequiredOnlyInput, :create)
+      end
     end
   end
 

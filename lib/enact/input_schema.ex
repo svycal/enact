@@ -97,6 +97,10 @@ defmodule Enact.InputSchema do
       (passwords, for example); these are not trimmed, and only a literal
       `""` counts as empty for them
 
+  Option fields must be `:string` fields on the schema; listing a field
+  outside a given head's cast list is allowed and inert, so option
+  attributes can be shared across mode heads with differing cast lists.
+
   Normalization applies only to fields whose schema type is literally
   `:string` and whose param value is a binary; custom types receive the
   raw value and apply their own `cast/1`. `:binary` fields are never
@@ -162,20 +166,24 @@ defmodule Enact.InputSchema do
     module
   end
 
-  defp validate_string_fields!(list, opt_name, module, fields) do
+  # schema-level check only: a listed field absent from this head's cast
+  # list is inert, so option attributes can be shared across mode heads
+  # with differing cast lists
+  defp validate_string_fields!(list, opt_name, module, _fields) do
     Enum.each(list, fn field ->
-      cond do
-        field not in fields ->
-          raise ArgumentError,
-                "#{opt_name} lists #{inspect(field)}, which is not in the cast field list"
+      case module.__schema__(:type, field) do
+        :string ->
+          :ok
 
-        module.__schema__(:type, field) != :string ->
+        nil ->
+          raise ArgumentError,
+                "#{opt_name} lists #{inspect(field)}, which does not exist on " <>
+                  inspect(module)
+
+        _other ->
           raise ArgumentError,
                 "#{opt_name} lists #{inspect(field)}, which is not a :string field on " <>
                   inspect(module)
-
-        true ->
-          :ok
       end
     end)
   end

@@ -77,10 +77,14 @@ defmodule Enact.Test do
   Probing is safe because input modules are dependency-free by contract
   (no ctx, no repo). Errors on other fields (for example
   `validate_required`) are ignored; only the probed field's cast outcome
-  is checked. `:string` and `:binary` fields are skipped, since `""` is a
-  valid value for both. A rejection counts when the probed field carries a
-  `:cast` error (regular and custom types) or an `:inclusion` error
-  (`Ecto.Enum` rejects `""` with `validation: :inclusion`).
+  is checked. `:string`, `:binary`, and `:binary_id` fields are skipped:
+  `""` is a valid value for the first two, and `:binary_id`'s
+  changeset-level cast accepts any binary (its format is validated at dump
+  time). A rejection counts when the probed field carries any error other
+  than `validation: :required` — custom types may tag rejections with
+  their own metadata (`Ecto.Enum` uses `:inclusion`), while a `:required`
+  error is the footgun's own signature: `""` silently coerced to `nil`,
+  then caught downstream.
 
   Options: `:except` — fields whose custom types accept `""` deliberately.
   """
@@ -91,13 +95,13 @@ defmodule Enact.Test do
 
     for field <- module.fields(mode) -- embeds,
         field not in except,
-        module.__schema__(:type, field) not in [:string, :binary] do
+        module.__schema__(:type, field) not in [:string, :binary, :binary_id] do
       changeset = module.changeset(struct(module), %{Atom.to_string(field) => ""}, mode)
 
       rejected? =
         changeset.errors
         |> Keyword.get_values(field)
-        |> Enum.any?(fn {_message, meta} -> meta[:validation] in [:cast, :inclusion] end)
+        |> Enum.any?(fn {_message, meta} -> meta[:validation] != :required end)
 
       unless rejected? do
         raise ExUnit.AssertionError,
