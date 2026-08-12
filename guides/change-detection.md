@@ -37,11 +37,11 @@ provided = module.fields(ctx.mode) |> Enum.filter(&Enact.provided?(ctx, &1))
 
 changeset
 |> Ecto.Changeset.apply_changes()
-|> Map.from_struct()
+|> dump_embeds(module)   # embed structs → plain maps, recursively
 |> Map.take(provided)
 ```
 
-Key selection is **presence-in-params intersected with the mode's castable fields** — not the change list. Values come from `apply_changes/1`. This yields a small theorem that carries all the PATCH fidelity:
+Key selection is **presence-in-params intersected with the mode's castable fields** — not the change list. Values come from `apply_changes/1`, with embed structs dumped to plain, atom-keyed maps (schema-driven, so scalar structs like `Date` and `Decimal` pass through intact) — the updates map feeds persistence changesets and JSON encoders directly. This yields a small theorem that carries all the PATCH fidelity:
 
 > For any provided key, either a change exists (you get the casted value), or no change exists *because the provided value equals the base* — in which case `apply_changes` yields that same value anyway. Either way, the updates map contains exactly what the caller said.
 

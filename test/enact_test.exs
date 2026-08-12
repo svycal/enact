@@ -379,9 +379,13 @@ defmodule EnactTest do
       assert updates == %{milestones: []}
     end
 
-    test "provided embeds come out as input-schema structs" do
-      assert {:ok, %{milestones: [%EnactTest.MilestoneInput{title: "Ship"}]}} =
-               run(UpdateProject, %{"milestones" => [%{"title" => "Ship"}]})
+    test "provided embeds are dumped to plain maps with scalar structs intact" do
+      assert {:ok, %{milestones: [item]}} =
+               run(UpdateProject, %{
+                 "milestones" => [%{"title" => "Ship", "due_on" => "2026-09-01"}]
+               })
+
+      assert item == %{title: "Ship", due_on: ~D[2026-09-01], owner_id: nil}
     end
 
     test "item-level errors nest under the embed key" do

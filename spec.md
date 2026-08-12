@@ -282,7 +282,7 @@ def updates(changeset, ctx) do
     changeset.data.__struct__.fields(ctx.mode)
     |> Enum.filter(&provided?(ctx, &1))
 
-  changeset |> apply_changes() |> Map.from_struct() |> Map.take(provided)
+  changeset |> apply_changes() |> dump_embeds() |> Map.take(provided)
 end
 ```
 
@@ -290,7 +290,7 @@ end
 - **Value correctness is independent of base correctness.** For any provided key: a recorded change yields the provided value; no change means the provided value equalled the base, so `apply_changes` yields it anyway. A wrong projection therefore cannot corrupt persisted data — its blast radius is confined to validation behavior. Omitted keys are excluded by presence and never leak base values into the write.
 - The PATCH cases resolve as: omitted → absent from updates → untouched. Explicit `null` → present with casted value nil → clears. Provided-identical → present with the same value → harmless no-op write (and visible to audit for free). `[]` on an embed → present with `[]` → clears the array.
 - Never use bare `apply_changes/1` output for persistence — it erases omitted-vs-provided.
-- **Embed values come out as input-schema structs**, and `Ecto.Changeset.cast` raises on struct params — `execute/2` must convert embed items to plain maps (typically in the same per-item translation that swaps public ids for internal ids) before feeding the persistence changeset.
+- **Embed values are dumped to plain maps.** `apply_changes` yields input-schema structs, and `Ecto.Changeset.cast` raises on struct params — so `updates/2` recursively unwraps embed structs into plain atom-keyed maps (schema-driven via `__schema__(:embeds)`; scalar structs like dates and decimals stay intact). The updates map feeds persistence changesets and JSON serializers directly; the cast structs remain recoverable from the changeset via `apply_changes/1` if ever needed.
 - Create correctness falls out: required fields are guaranteed present by `validate_required`; omitted optionals are absent from updates and fall to DB defaults — client-visible behavior identical to a conventional cast-and-insert.
 
 ### 5.3 The validation base — `from_subject/1`

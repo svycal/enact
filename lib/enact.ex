@@ -170,8 +170,9 @@ defmodule Enact do
   castable fields (`fields/1`) — uniform for scalars and embeds. Omitted
   keys are absent (untouched on PATCH); explicit `null` is present as
   `nil` (clears); `[]` on an embed is present as `[]` (clears the array).
-  Embed values come out as input-schema structs — `execute/2` converts
-  them to plain maps before feeding a persistence changeset.
+  Embed values are dumped to plain, atom-keyed maps (recursively,
+  schema-driven; scalar structs like `Date` and `Decimal` stay intact),
+  so the map feeds persistence changesets and JSON encoders directly.
 
   Never use bare `apply_changes/1` output for persistence — it erases
   omitted-vs-provided. For `input: nil` actions this returns `%{}`.
@@ -182,11 +183,32 @@ defmodule Enact do
 
     changeset
     |> Ecto.Changeset.apply_changes()
-    |> Map.from_struct()
+    |> dump(module)
     |> Map.take(provided)
   end
 
   def updates(%Ecto.Changeset{}, %Context{}), do: %{}
+
+  # unwraps embed structs into plain maps, recursively; only fields the
+  # schema declares as embeds are touched, so scalar structs (Date,
+  # Decimal, ...) pass through intact
+  defp dump(struct, module) do
+    embeds = module.__schema__(:embeds)
+
+    struct
+    |> Map.from_struct()
+    |> Map.new(fn {field, value} ->
+      if field in embeds do
+        {field, dump_embed(value, module.__schema__(:embed, field).related)}
+      else
+        {field, value}
+      end
+    end)
+  end
+
+  defp dump_embed(nil, _related), do: nil
+  defp dump_embed(items, related) when is_list(items), do: Enum.map(items, &dump(&1, related))
+  defp dump_embed(item, related), do: dump(item, related)
 
   ## Setup shared by run/3 and dry_run/3
 
