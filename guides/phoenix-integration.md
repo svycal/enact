@@ -1,6 +1,6 @@
 # Phoenix Integration
 
-Enact has no Phoenix dependency, so a host app wires three seams itself: the actor, the controller calling convention, and the error renderer. Every host wires them the same way — this guide is the reference implementation.
+Enact has no Phoenix dependency. A host application wires three integration points itself: the actor, the controller calling convention, and the error renderer. This guide provides reference implementations for each.
 
 ## Setup
 
@@ -14,13 +14,13 @@ config :enact, repo: MyApp.Repo
 
 ## The actor: your scope struct
 
-In Phoenix 1.8+ the recommended actor is the scope struct — actions inherit its role wholesale, and Enact never looks inside it (only your `authorize/1` and fetchers do):
+In Phoenix 1.8+, the recommended actor is the scope struct. Enact never reads the actor itself; only your `authorize/1` callbacks and fetchers do.
 
 ```elixir
 Enact.run(CreateProject, params, actor: conn.assigns.current_scope)
 ```
 
-Teach Enact which scopes are anonymous with a small protocol impl:
+Implement the `Enact.Actor` protocol for your scope struct so Enact can identify anonymous scopes:
 
 ```elixir
 # lib/my_app/accounts/scope.ex
@@ -30,7 +30,7 @@ defimpl Enact.Actor, for: MyApp.Accounts.Scope do
 end
 ```
 
-`actor: nil` always raises — deliberately colliding with `current_scope: nil` on public routes. Public endpoints construct an explicit anonymous scope at the boundary (which can carry session id and IP for rate limiting):
+`actor: nil` always raises. This intentionally conflicts with `current_scope: nil` on public routes: public endpoints must construct an explicit anonymous scope at the boundary. An anonymous scope can carry a session ID and IP for rate limiting:
 
 ```elixir
 # a plug on public pipelines
@@ -42,29 +42,29 @@ def assign_public_scope(conn, _opts) do
 end
 ```
 
-Only actions declaring `anonymous?: true` in `config/0` accept an anonymous actor; everything else returns `:forbidden` before any pipeline work. Grep for `anonymous?: true` to audit your unauthenticated write surface.
+Only actions that declare `anonymous?: true` in `config/0` accept an anonymous actor. All other actions return `:forbidden` before any pipeline work runs. To audit the unauthenticated write surface, search the codebase for `anonymous?: true`.
 
-### Not using scopes?
+### Without scopes
 
-Nothing requires the scope pattern — the actor is opaque to Enact, so any term works. In an app that assigns `current_user`, pass it directly:
+The scope pattern is not required. The actor is opaque to Enact, so any term works. In an application that assigns `current_user`, pass it directly:
 
 ```elixir
 Enact.run(CreateProject, params, actor: conn.assigns.current_user)
 ```
 
-Authenticated actors need no `Enact.Actor` impl at all — the fallback answers `anonymous?/1` with `false` for any term. Your actions' `authorize/1` and fetchers simply read `ctx.actor` as a user struct instead of a scope.
+Authenticated actors need no `Enact.Actor` implementation; the fallback returns `false` for any term. Your `authorize/1` callbacks and fetchers read `ctx.actor` as a user struct instead of a scope.
 
-The rule for public endpoints is unchanged: never pass `nil`. The bare `:anonymous` atom is the zero-ceremony anonymous actor, built in:
+The rule for public endpoints is unchanged: never pass `nil`. The `:anonymous` atom is a built-in anonymous actor:
 
 ```elixir
 Enact.run(CreateBooking, params, actor: :anonymous)
 ```
 
-The trade-off versus a rich anonymous scope is that `:anonymous` carries no session id or IP — if your `anonymous?: true` actions need those for rate limiting or audit, that's the cue to graduate to a scope-shaped actor.
+Unlike an anonymous scope, `:anonymous` carries no session ID or IP. If your `anonymous?: true` actions need those for rate limiting or auditing, use a scope-shaped actor instead.
 
 ## Controllers
 
-Phoenix merges path params into `params`, so the subject id (`load/2` reads it) and the body arrive together — pass `params` straight through:
+Phoenix merges path params into `params`, so the subject ID (read by `load/2`) and the request body arrive together. Pass `params` through unchanged:
 
 ```elixir
 defmodule MyAppWeb.ProjectController do
@@ -90,7 +90,7 @@ end
 
 ## Rendering errors
 
-One fallback clause handles every action in the app — the closed taxonomy means this code never grows:
+One fallback clause handles every action. Because the error taxonomy is closed, this code does not change as actions are added:
 
 ```elixir
 defmodule MyAppWeb.FallbackController do
@@ -113,15 +113,15 @@ end
 
 ```elixir
 defmodule MyAppWeb.ErrorJSON do
-  # :invalid is the only outward-rich type — the changeset describes the
-  # caller's own input, so traverse_errors is safe to serialize. Nested and
-  # indexed embed errors (including resolver failures) render correctly with
-  # zero per-action knowledge.
+  # :invalid is the only type that carries caller-visible detail. The
+  # changeset describes the caller's own input, so traverse_errors is safe
+  # to serialize. Nested and indexed embed errors (including resolver
+  # failures) render correctly with no per-action code.
   def enact(%{error: %Enact.Error{type: :invalid, changeset: changeset}}) do
     %{errors: Ecto.Changeset.traverse_errors(changeset, &translate_error/1)}
   end
 
-  # NEVER serialize error.reason — it is internal-only (logs/telemetry).
+  # Do not serialize error.reason — it is internal-only (logs/telemetry).
   def enact(%{error: %Enact.Error{type: type}}) do
     %{errors: %{detail: detail(type)}}
   end
@@ -132,7 +132,7 @@ defmodule MyAppWeb.ErrorJSON do
   defp detail(:internal), do: "Internal server error"
 
   defp translate_error({msg, opts}) do
-    # Gettext-backed in a real app; this renderer is your API-versioning seam
+    # Gettext-backed in a real app. This renderer is the API-versioning seam.
     Regex.replace(~r"%{(\w+)}", msg, fn _, key ->
       opts |> Keyword.get(String.to_existing_atom(key), key) |> to_string()
     end)
@@ -140,16 +140,16 @@ defmodule MyAppWeb.ErrorJSON do
 end
 ```
 
-Two renderer policies to decide once:
+Two renderer policies to decide:
 
-- **404/403 collapse** — rendering `:forbidden` as 404 is defense-in-depth against existence leaks. Keep the two types distinct internally (different bugs); collapse only at the renderer.
-- **Stable error codes** — resolver failures carry `validation: :resolution` in the error metadata, so `translate_error/1` can emit machine-readable codes distinguishing reference errors from format errors without string matching.
+- **404/403 collapse.** Rendering `:forbidden` as 404 prevents responses from revealing that a resource exists. Keep the two types distinct internally; collapse only at the renderer.
+- **Stable error codes.** Resolver failures carry `validation: :resolution` in the error metadata, so `translate_error/1` can emit machine-readable codes that distinguish reference errors from format errors without string matching.
 
 ## Constraint errors and stale races
 
-A `{:error, %Ecto.Changeset{}}` returned from `execute/2` rolls the transaction back and is promoted to `:invalid` — this is how declared constraints (`unique_constraint`, `foreign_key_constraint`) surface as ordinary 422 field errors when the database catches a race that pre-flight validation couldn't.
+A `{:error, %Ecto.Changeset{}}` returned from `execute/2` rolls the transaction back and is promoted to `:invalid`. This is how declared constraints (`unique_constraint`, `foreign_key_constraint`) surface as ordinary 422 field errors when the database catches a race that pre-flight validation could not.
 
-One caveat: **stale-entry races arrive through the same channel.** `Repo.update(changeset, stale_error_field: :lock_version)` also returns `{:error, changeset}`, so without intervention an optimistic-lock failure renders as `:invalid` — a field error on `:lock_version` — when it is really the "input was fine; the world changed" case that `:conflict` (409) exists for. If an action uses optimistic locking, translate that specific failure in `execute/2`; the runner passes an `%Enact.Error{}` through untouched:
+Stale-entry races arrive through the same channel. `Repo.update(changeset, stale_error_field: :lock_version)` also returns `{:error, changeset}`, so without intervention an optimistic-lock failure renders as `:invalid` with a field error on `:lock_version`. The correct type for that case is `:conflict` (409): the input was valid, but the record changed. If an action uses optimistic locking, translate that failure in `execute/2`. The runner passes an `%Enact.Error{}` through unchanged:
 
 ```elixir
 @impl Enact.Action
@@ -165,7 +165,7 @@ def execute(changeset, ctx) do
       if errors[:lock_version] do
         {:error, Enact.Error.conflict(:stale)}
       else
-        # constraint errors keep flowing to :invalid
+        # constraint errors continue to flow to :invalid
         {:error, failed}
       end
 
@@ -175,9 +175,9 @@ def execute(changeset, ctx) do
 end
 ```
 
-Related: the changeset in a promoted constraint error is the *persistence* changeset, so keep constraint-bearing field names aligned with the input schema's names (or re-map in `execute/2`) so the rendered field addressing matches your API contract.
+The changeset in a promoted constraint error is the persistence changeset, not the input changeset. Keep constraint-bearing field names aligned with the input schema's names, or re-map them in `execute/2`, so the rendered field addressing matches your API contract.
 
-If an action would rather never reflect the persistence changeset — it declares no constraints, or its persistence field names don't match the input's — treat an unexpected changeset error as what it is: validation and persistence have drifted, which is a bug, not caller input. Log it for your own introspection and return `:internal` (the runner passes an `%Enact.Error{}` through untouched, and `reason` is never serialized — the caller sees only a generic 500):
+Some actions should never reflect the persistence changeset to callers — for example, when the action declares no constraints, or when persistence field names do not match the input's. In that case, an unexpected changeset error indicates that validation and persistence have drifted, which is a bug rather than caller input. Log it and return `:internal`. The `reason` field is never serialized, so the caller sees only a generic 500:
 
 ```elixir
 require Logger
@@ -201,11 +201,11 @@ def execute(changeset, ctx) do
 end
 ```
 
-This is the spec's ":internal is a bug bucket" discipline in practice — every occurrence in production logs is a drift to fix, never something to render.
+Every `:internal` occurrence in production logs is a defect to fix. It is never rendered to callers.
 
 ## Background jobs
 
-Same calling convention — reconstruct the actor from stored identity; never bypass:
+Background jobs use the same calling convention. Reconstruct the actor from stored identity; do not bypass the action layer:
 
 ```elixir
 defmodule MyApp.Workers.ArchiveStaleProject do
@@ -217,7 +217,7 @@ defmodule MyApp.Workers.ArchiveStaleProject do
 
     case Enact.run(MyApp.Projects.Actions.ArchiveProject, %{"id" => id}, actor: actor) do
       {:ok, _} -> :ok
-      # already archived / gone: don't retry
+      # already archived or deleted: don't retry
       {:error, %Enact.Error{type: :not_found}} -> :ok
       {:error, error} -> {:error, error}
     end
@@ -227,7 +227,7 @@ end
 
 ## Telemetry
 
-Per-action, per-type metrics and audit trails with zero action-author involvement:
+The runner emits telemetry events for every action. Attach a handler for metrics and audit trails:
 
 ```elixir
 :telemetry.attach_many(
@@ -243,15 +243,14 @@ Per-action, per-type metrics and audit trails with zero action-author involvemen
 )
 ```
 
-Error events carry `type:` in metadata ("actor X attempted Y, denied :forbidden"). Dry runs emit distinct events, so previews are auditable without inflating execution counts.
+Error events carry `type:` in metadata, so a handler can record entries such as "actor X attempted Y, denied :forbidden". Dry runs emit separate events, so previews are auditable without inflating execution counts.
 
 ## Confirmation flows (agent surfaces, MCP tools)
 
 ```elixir
 {:ok, preview} = Enact.dry_run(UpdateProject, params, actor: actor)
-# reflect preview.updates back for confirmation; render old → new diffs by
-# comparing against the subject; then:
+# present preview.updates for confirmation, then:
 {:ok, project} = Enact.run(UpdateProject, params, actor: actor, confirm_digest: preview.digest)
 ```
 
-The digest binds action, mode, and the exact updates map — `:conflict` on any drift. The preview lists resolver names only; if the confirmation UX needs display info ("assigning to Jane Doe"), render it host-side.
+The digest binds the action, mode, and updates map; any difference between the previewed change and the confirming run returns `:conflict`. The preview lists resolver names only. If the confirmation UI needs display information (for example, the resolved user's name), render it host-side from your own reads.

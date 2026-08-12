@@ -1,10 +1,10 @@
 # Recipes
 
-Worked, end-to-end examples of the patterns that come up in real actions. Every sample follows the documented conventions — context-scoped module layout, private fetchers dispatching to context functions, presence-faithful handling of `Enact.updates/2` output — so they can serve as precedent, not just illustration.
+End-to-end examples of common patterns. The samples follow the documented conventions: context-scoped module layout, private fetchers dispatching to context functions, and presence-preserving handling of `Enact.updates/2` output.
 
 ## 1. Embedded data end-to-end
 
-An order with line items: nested input casting, per-item validation, batch resolution of item references, and replace-wholesale persistence. Note the item schema is defined *before* the parent — an alias referenced by `embeds_many` must already resolve when the schema block expands.
+An order with line items: nested input casting, per-item validation, batch resolution of item references, and replace-wholesale persistence. The item schema is defined before the parent, because an alias referenced by `embeds_many` must resolve when the schema block expands.
 
 ```elixir
 # lib/my_app/orders/inputs/line_item_input.ex
@@ -79,8 +79,8 @@ defmodule MyApp.Orders.Actions.CreateOrder do
     updates = Enact.updates(changeset, ctx)
     products = ctx.assigns.products
 
-    # items arrive as plain maps; swap public ids for internal FKs —
-    # the batch lookup map makes the join a map read per item
+    # items arrive as plain maps; swap public IDs for internal foreign keys
+    # by reading the batch lookup map
     items =
       Enum.map(updates.items, fn item ->
         %{item | product_id: products[item.product_id].id}
@@ -91,8 +91,8 @@ defmodule MyApp.Orders.Actions.CreateOrder do
     |> ctx.repo.insert()
   end
 
-  # one query for all unique ids; scoped by the trust anchor first, and
-  # precise messages only about records the scoped query returned
+  # one query for all unique IDs; scoped by the trust anchor first, and
+  # precise messages only for records the scoped query returned
   defp fetch_products(public_ids, ctx) do
     ctx.actor
     |> Catalog.get_products_by_public_ids(public_ids)
@@ -104,11 +104,11 @@ defmodule MyApp.Orders.Actions.CreateOrder do
 end
 ```
 
-An unknown or cross-tenant `product_id` is simply absent from the fetcher's map and renders the generic `"not found"` at the right item index; a deactivated product in the caller's own tenant renders the precise message. Both arrive as ordinary 422 field errors.
+An unknown or cross-tenant `product_id` is absent from the fetcher's result map and renders the generic `"not found"` at the correct item index. A deactivated product in the caller's own tenant renders the precise message. Both arrive as ordinary 422 field errors.
 
 ## 2. Flattening an embed into columns
 
-The API models an address as a nested object; the table stores flat columns. The input/persistence boundary translation lives in `execute/2` — and the three presence cases (omitted, explicit `null`, provided) must each map faithfully:
+The API models an address as a nested object; the table stores flat columns. The translation lives in `execute/2`, and each of the three presence cases (omitted, explicit `null`, provided) must be handled:
 
 ```elixir
 # lib/my_app/customers/actions/update_customer.ex
@@ -168,11 +168,11 @@ defmodule MyApp.Customers.Actions.UpdateCustomer do
 end
 ```
 
-`Map.fetch/2` (never `Map.get/2`) is what keeps PATCH fidelity through the transform — `Map.get` would collapse "omitted" and "explicit null" into one case. Reminder for the input module: `from_subject/1` still leaves the `address` embed unseeded; a validation that needs the *current* address reads `ctx.subject` directly.
+Use `Map.fetch/2`, not `Map.get/2`. `Map.get` returns `nil` for both "omitted" and "explicit null", collapsing two cases that must map differently. In the input module, `from_subject/1` leaves the `address` embed unseeded; a validation that needs the current address reads `ctx.subject` directly.
 
 ## 3. Reading resolver assigns in `execute/2`
 
-The scalar counterpart of recipe 1's batch join. Because resolution is presence-gated, the contract is total: whenever a non-nil reference appears in updates, the resolved record is in `ctx.assigns` — no defensive `Map.get` needed. The three presence cases still deserve explicit handling:
+The scalar counterpart of recipe 1's batch lookup. Resolution is presence-gated, so whenever a non-nil reference appears in updates, the resolved record is present in `ctx.assigns`. Handle the three presence cases explicitly:
 
 ```elixir
 @impl Enact.Action
@@ -196,9 +196,9 @@ defp translate_owner(updates, ctx) do
   case Map.fetch(updates, :owner_id) do
     # omitted → untouched
     :error -> updates
-    # explicit null → the FK clears; nil passes through as-is
+    # explicit null → the foreign key clears; nil passes through
     {:ok, nil} -> updates
-    # provided → resolved and re-authorized; swap public id for internal
+    # provided → resolved and re-authorized; swap public ID for internal
     {:ok, _public_id} -> %{updates | owner_id: ctx.assigns.owner.id}
   end
 end
@@ -213,7 +213,7 @@ end
 
 ## 4. Dry-run previews in an MCP response
 
-The two-phase confirmation flow for an agent-facing tool. `preview.updates` is plain atom-keyed data (embeds included), so it JSON-encodes directly; the digest — not your serialization — carries confirmation exactness, so the display shape is free to be lossy or prettified.
+A two-phase confirmation flow for an agent-facing tool. `preview.updates` is plain atom-keyed data, embeds included, so it JSON-encodes directly. The digest, not the serialized display, carries confirmation integrity, so the display format can be reshaped freely.
 
 ```elixir
 defmodule MyAppWeb.MCP.UpdateProjectTool do
@@ -224,7 +224,7 @@ defmodule MyAppWeb.MCP.UpdateProjectTool do
   def call(params, scope) do
     case Enact.dry_run(UpdateProject, params, actor: scope) do
       {:ok, preview} ->
-        # old → new diff: the host owns reads, so fetch current values itself
+        # old → new diff: the host owns reads, so fetch current values directly
         current =
           Projects.get_project(scope, params["id"])
           |> Projects.serialize()
@@ -234,9 +234,8 @@ defmodule MyAppWeb.MCP.UpdateProjectTool do
           status: "needs_confirmation",
           changes: preview.updates,
           current: current,
-          # resolver names only — loaded records never reach the agent;
-          # if the UX needs display info ("assigning to Jane Doe"),
-          # render it host-side from your own reads
+          # resolver names only — loaded records never reach the agent; if
+          # the UI needs display info, render it host-side from your own reads
           resolved: preview.resolved,
           confirm_digest: preview.digest
         }
@@ -262,11 +261,11 @@ defmodule MyAppWeb.MCP.UpdateProjectTool do
 end
 ```
 
-The full pipeline re-runs on confirm — authorization, validation, resolution — so a digest match with changed world state still surfaces `:invalid`/`:not_found` normally; the digest only guards against the *change itself* drifting between preview and confirm (it binds action, mode, and the exact updates map). Both phases emit distinct telemetry, so audit trails count previews and executions separately.
+The full pipeline runs again on confirm — authorization, validation, resolution — so a digest match with changed world state still surfaces `:invalid` or `:not_found` normally. The digest only guards against the change itself differing between preview and confirm; it binds the action, mode, and updates map. Both phases emit separate telemetry events, so audit trails count previews and executions separately.
 
 ## 5. Empty-string-at-rest columns
 
-Most optional text should be nullable at rest — `NULL` as the single representation of empty — and needs none of this (see the column convention in the Change Detection guide). But a legacy `NOT NULL DEFAULT ''` column makes `""` a *legitimate value* that Ecto's default cast destroys: `""` coalesces to `nil`, which then violates NOT NULL at persistence. The pattern: declare the exception, preserve empties at the cast, normalize whitespace explicitly, and reject explicit null in the action.
+Most optional text should be nullable at rest, with `NULL` as the single representation of empty; those fields need none of the following (see the column convention in the Change Detection guide). On a `NOT NULL DEFAULT ''` column, however, `""` is a valid value, and Ecto's default cast converts it to `nil`, which violates the NOT NULL constraint at persistence. The pattern: declare the exception, preserve empties at the cast, normalize whitespace explicitly, and reject explicit null in the action.
 
 ```elixir
 # lib/my_app/customers/inputs/customer_input.ex
@@ -284,8 +283,8 @@ defmodule MyApp.Customers.Inputs.CustomerInput do
   end
 
   @scalars ~w(name summary)a
-  # summary is deliberately NOT in @required: validate_required treats ""
-  # as blank, but "" is this field's legitimate value
+  # summary is not in @required: validate_required treats "" as blank,
+  # but "" is a valid value for this field
   @required ~w(name)a
 
   # NOT NULL DEFAULT '' columns: "" is a value, so empties must survive
@@ -313,7 +312,7 @@ defmodule MyApp.InputHelpers do
   import Ecto.Changeset
 
   # update_change only fires on recorded changes, and the change value can
-  # legitimately be nil (an explicit null on patch) — guard it
+  # be nil (an explicit null on patch) — guard it
   def trim_strings(changeset, fields) do
     Enum.reduce(fields, changeset, fn field, changeset ->
       update_change(changeset, field, fn
@@ -325,7 +324,7 @@ defmodule MyApp.InputHelpers do
 end
 ```
 
-Explicit null is the remaining case: this field is *never-null but blank-fine*, which is outside `validate_required`'s vocabulary (nil-or-blank). Only presence can distinguish "omitted" (fine — DB default applies) from "explicit null" (error), so the rule lives in the action's `validate/2`:
+Explicit null is the remaining case. The field must never be null but may be blank, which `validate_required` cannot express: it rejects both `nil` and blank strings. Only presence distinguishes "omitted" (allowed — the column default applies) from "explicit null" (an error), so the rule lives in the action's `validate/2`:
 
 ```elixir
 @impl Enact.Action
@@ -338,4 +337,4 @@ def validate(changeset, ctx) do
 end
 ```
 
-The cases then resolve as: `""` → persists `""`; `"   "` → trims to `""`; explicit `null` → 422 on `:summary`; omitted → untouched (create inserts fall to the column default). The drift test in the Testing guide catches any `""`-at-rest field someone wires with a plain cast.
+The cases resolve as follows: `""` persists as `""`; `"   "` trims to `""`; explicit `null` returns a 422 on `:summary`; omitted leaves the field untouched, and create inserts fall to the column default. The drift test in the Testing guide catches any `""`-at-rest field wired with a plain cast.

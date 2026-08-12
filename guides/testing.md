@@ -1,10 +1,10 @@
 # Testing Host Applications
 
-Enact's own suite covers the pipeline mechanics. Five test obligations belong to the host app because they depend on your real actions, schemas, and tenancy model — they are part of the definition of done for adopting Enact. This guide is a set of copy-paste templates; `import Enact.Test` provides `assert_invalid/2`, `build_ctx/1`, and `errors_on/1` throughout.
+Enact's own suite covers the pipeline mechanics. Five test obligations belong to the host application because they depend on your actions, schemas, and tenancy model. This guide provides templates for each. `import Enact.Test` provides `assert_invalid/2`, `build_ctx/1`, and `errors_on/1` throughout.
 
 ## The action registry
 
-Every template enumerates your actions, so maintain one explicit list — plus a completeness check so a new action can't dodge the suite:
+The templates enumerate your actions, so maintain one explicit list, plus a completeness check so new actions cannot be omitted from the suite:
 
 ```elixir
 defmodule MyApp.Actions do
@@ -36,7 +36,7 @@ end
 
 ## 1. Guardrails in CI
 
-The runner checks input schemas lazily on first run; this makes the check compile-adjacent instead:
+The runner checks input schemas lazily on first run. This test moves the check to CI:
 
 ```elixir
 test "every input schema passes guardrails" do
@@ -49,7 +49,7 @@ end
 
 ## 2. Cross-tenant sweep
 
-The core security property: run every action as a tenant-A actor against tenant-B's subject and references. Subjects must be `:not_found`; foreign references must produce only the generic `"not found"` field error (never a precise message — that's an existence leak).
+Run every action as a tenant-A actor against tenant-B's subject and references. Subjects must return `:not_found`. Foreign references must produce only the generic `"not found"` field error; a precise message would reveal that the record exists.
 
 ```elixir
 describe "cross-tenant isolation" do
@@ -82,7 +82,7 @@ describe "cross-tenant isolation" do
 end
 ```
 
-(`valid_params_for/2` and `put_reference/3` are yours to write — a per-action map of known-good params, with the reference field swapped. The scalar spec form is a field atom; the batch form is `[embed_field, item_field]`.)
+`valid_params_for/2` and `put_reference/3` are application-specific: a per-action map of known-good params, with the reference field swapped. The scalar spec form is a field atom; the batch form is `[embed_field, item_field]`.
 
 Anonymous variants of the same sweep:
 
@@ -104,7 +104,7 @@ end
 
 ## 3. The PATCH matrix (per patch action)
 
-Eight cases per patch action; here against an `UpdateProject` whose `name` is required, `priority` optional, `milestones` an embed:
+Eight cases per patch action. This example uses an `UpdateProject` action where `name` is required, `priority` is optional, and `milestones` is an embed:
 
 ```elixir
 describe "UpdateProject PATCH semantics" do
@@ -137,13 +137,13 @@ describe "UpdateProject PATCH semantics" do
     assert updated.milestones == []
   end
 
-  test "provided-identical persists as a harmless no-op write", ctx do
+  test "provided-identical persists as a no-op write", ctx do
     assert {:ok, updated} = run_patch(ctx, %{"name" => "Old"})
     assert updated.name == "Old"
   end
 
   test "a provided reference re-resolves; an absent one survives", ctx do
-    # provided (even identical) → fetcher runs, re-authorizing the reference
+    # provided (even identical) → the fetcher runs, re-authorizing the reference
     # absent → untouched, no fetcher call
   end
 end
@@ -154,7 +154,8 @@ end
 ```elixir
 test "omitted optionals fall to DB defaults" do
   {:ok, project} = Enact.run(CreateProject, %{"name" => "A", "slug" => "a"}, actor: actor)
-  assert project.priority == 1  # the column default — asserting the DB owns it
+  # the column default applies
+  assert project.priority == 1
 end
 
 test "explicit nil on a required field fails validate_required" do
@@ -167,7 +168,7 @@ end
 
 ## 5. Projection completeness (per patch-mode input module)
 
-A forgotten `from_subject/1` field silently revives the nil-clear-vs-omitted ambiguity for that field — this makes it fail CI instead:
+If `from_subject/1` omits a field, validations can no longer distinguish nil-clears from omissions for that field. This test fails in CI instead:
 
 ```elixir
 test "ProjectInput.from_subject/1 is total over scalar fields" do
@@ -191,7 +192,7 @@ end
 
 ## 6. Resolver coverage
 
-Catches "added a reference field, forgot the resolver" — which otherwise sends a raw public-id string to persistence:
+This test catches reference fields added without a resolver. Without one, the raw public-ID string reaches persistence:
 
 ```elixir
 # legitimately opaque _id fields (external references, idempotency keys) —
@@ -223,7 +224,7 @@ end
 
 ## 7. Doc-schema reconciliation (if you document your API)
 
-Enact knows nothing of OpenApiSpex; drift prevention is a host-side zip of the `fields/1` manifests against your doc source of truth:
+Enact has no knowledge of OpenApiSpex. Drift prevention is a host-side comparison of the `fields/1` manifests against your documentation source of truth:
 
 ```elixir
 test "ProjectInput matches the documented request schema" do
@@ -237,7 +238,7 @@ end
 
 ## 8. Empty-string-at-rest drift
 
-Any persistence field whose struct default is `""` is an empty-string-at-rest column (`NOT NULL DEFAULT ''`) — its input cast must preserve `""` instead of coalescing it to `nil` (recipe 5 in the Recipes guide). This derives those fields mechanically and fails CI when one is wired with a plain cast:
+Any persistence field whose struct default is `""` is an empty-string-at-rest column (`NOT NULL DEFAULT ''`). Its input cast must preserve `""` instead of coalescing it to `nil` (see recipe 5 in the Recipes guide). This test derives those fields mechanically and fails when one is wired with a plain cast:
 
 ```elixir
 # {input module, persistence schema, mode} for every input casting such fields
@@ -267,4 +268,4 @@ end
 
 ## Dry-run additions
 
-For any action exposed through a confirmation flow: assert `dry_run` performs no writes, that `preview.updates` equals what an identical `run` persists, and that a mismatched or cross-action `confirm_digest` returns `:conflict`.
+For any action exposed through a confirmation flow: assert that `dry_run` performs no writes, that `preview.updates` equals what an identical `run` persists, and that a mismatched or cross-action `confirm_digest` returns `:conflict`.
