@@ -68,7 +68,7 @@ Do not use bare `apply_changes/1` output for persistence. The full struct does n
 
 **`empty_values:`** remains available, but it is a host decision. The runner never calls `cast/3`; the input module's changeset heads do. Ecto's default treats `""` and whitespace-only strings as empty on every field type, so `"name": ""` behaves like an explicit nil-clear — and `"count": ""` on an integer field silently becomes a null-clear instead of a type error.
 
-`Enact.InputSchema.cast_input/4` packages the recommended JSON API policy so this does not have to be configured per cast call. It derives empty-string handling from each field's type: `""` on a non-string field is a cast error (`"is invalid"`); `:string` values are trimmed, then empty coalesces to `nil`. Two options declare the exceptions: `keep_empty_strings:` for fields where `""` is a value, and `trim_except:` for fields where whitespace is significant. `Enact.Test.assert_rejects_empty_strings/3` verifies the non-string outcome in CI regardless of which casting mechanism a module uses.
+`Enact.InputSchema.cast_input/4` packages the recommended JSON API policy so this does not have to be configured per cast call. It derives empty-string handling from each field's type: `""` on a non-string field is a cast error (`"is invalid"`); empty-ish `:string` values (`""`, whitespace-only) coalesce to `nil`, while non-empty values pass through as sent — casting interprets input, it never modifies values. One option declares the exception: `keep_empty_strings:` for fields where `""` is a value. `Enact.Test.assert_rejects_empty_strings/3` verifies the non-string outcome in CI regardless of which casting mechanism a module uses.
 
 ### Column convention
 

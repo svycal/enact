@@ -12,20 +12,16 @@ defmodule Enact.InputSchemaTest do
     embedded_schema do
       field :name, :string
       field :summary, :string
-      field :password, :string
       field :count, :integer
       field :active, :boolean
       field :status, Ecto.Enum, values: [:draft, :live]
     end
 
-    @fields ~w(name summary password count active status)a
+    @fields ~w(name summary count active status)a
 
     @impl Enact.InputSchema
     def changeset(base, params, :create) do
-      cast_input(base, params, @fields,
-        keep_empty_strings: [:summary],
-        trim_except: [:password]
-      )
+      cast_input(base, params, @fields, keep_empty_strings: [:summary])
     end
 
     @impl Enact.InputSchema
@@ -58,11 +54,11 @@ defmodule Enact.InputSchemaTest do
       assert meta[:validation] == :inclusion
     end
 
-    test "string values are trimmed" do
-      assert get_field(changeset(%{"name" => "  hi  "}), :name) == "hi"
+    test "non-empty string values pass through as sent (never trimmed)" do
+      assert get_field(changeset(%{"name" => "  hi  "}), :name) == "  hi  "
     end
 
-    test "empty strings on string fields coalesce to nil" do
+    test "empty-ish strings coalesce to nil (trimmed emptiness test)" do
       assert get_field(changeset(%{"name" => ""}), :name) == nil
       assert get_field(changeset(%{"name" => "   "}), :name) == nil
     end
@@ -70,13 +66,7 @@ defmodule Enact.InputSchemaTest do
     test "keep_empty_strings fields keep \"\" as the value" do
       assert get_field(changeset(%{"summary" => ""}), :summary) == ""
       assert get_field(changeset(%{"summary" => "   "}), :summary) == ""
-      assert get_field(changeset(%{"summary" => " hi "}), :summary) == "hi"
-    end
-
-    test "trim_except fields keep whitespace; only a literal \"\" is empty" do
-      assert get_field(changeset(%{"password" => "  s3cret "}), :password) == "  s3cret "
-      assert get_field(changeset(%{"password" => "   "}), :password) == "   "
-      assert get_field(changeset(%{"password" => ""}), :password) == nil
+      assert get_field(changeset(%{"summary" => " hi "}), :summary) == " hi "
     end
 
     test "explicit nil and omission pass through unchanged" do
@@ -85,7 +75,7 @@ defmodule Enact.InputSchemaTest do
     end
 
     test "atom-keyed params are normalized too" do
-      assert get_field(changeset(%{name: "  hi  "}), :name) == "hi"
+      assert get_field(changeset(%{name: "   "}), :name) == nil
       assert get_field(changeset(%{summary: ""}), :summary) == ""
     end
 
@@ -114,7 +104,7 @@ defmodule Enact.InputSchemaTest do
     test "option fields outside this head's cast list are inert" do
       # shared option attributes across mode heads with differing cast
       # lists: the listed field simply isn't cast by this head
-      result = cast_input(%Input{}, %{"password" => " x "}, [:name], trim_except: [:password])
+      result = cast_input(%Input{}, %{"summary" => ""}, [:name], keep_empty_strings: [:summary])
 
       assert result.valid?
       assert result.changes == %{}
@@ -122,7 +112,7 @@ defmodule Enact.InputSchemaTest do
 
     test "options reject nonexistent fields" do
       assert_raise ArgumentError, ~r/does not exist on/, fn ->
-        cast_input(%Input{}, %{}, [:name], trim_except: [:typo_field])
+        cast_input(%Input{}, %{}, [:name], keep_empty_strings: [:typo_field])
       end
     end
 

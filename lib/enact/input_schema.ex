@@ -106,19 +106,23 @@ defmodule Enact.InputSchema do
 
   | Input            | Non-string field         | `:string` field       | `:string` in `keep_empty_strings:` |
   | ---------------- | ------------------------ | --------------------- | ---------------------------------- |
-  | `"5"`, `"true"`  | coerced via `Ecto.Type`  | value, trimmed        | value, trimmed                     |
+  | `"5"`, `"true"`  | coerced via `Ecto.Type`  | value as sent         | value as sent                      |
   | `""`, `"   "`    | `"is invalid"` error     | `nil` (empty → clear) | `""` (empty is a value)            |
   | `null`           | `nil`                    | `nil`                 | `nil`                              |
   | omitted          | untouched                | untouched             | untouched                          |
 
-  Options (a closed set — anything else raises):
+  Values are never modified: casting interprets input, it does not
+  transform it. A `:string` value is checked for emptiness with a trimmed
+  test (matching Ecto's own default, so `"   "` counts as empty), but a
+  non-empty value passes through exactly as sent — `" hi "` keeps its
+  whitespace. Data hygiene such as trimming is a separate, explicit
+  concern for changeset heads or validations, not a cast side effect.
+
+  One option (anything else raises):
 
     * `:keep_empty_strings` — `:string` fields whose empty disposition is
       `""` rather than `nil`, for `NOT NULL DEFAULT ''` columns where the
       empty string is a value
-    * `:trim_except` — `:string` fields whose whitespace is significant
-      (passwords, for example); these are not trimmed, and only a literal
-      `""` counts as empty for them
 
   Option fields must be `:string` fields on the schema; listing a field
   outside a given head's cast list is allowed and inert, so option
@@ -126,15 +130,15 @@ defmodule Enact.InputSchema do
 
   Normalization applies only to fields whose schema type is literally
   `:string` and whose param value is a binary; custom types receive the
-  raw value and apply their own `cast/1`. `:binary` fields are never
-  trimmed and keep `""` as a value (it is a valid binary). Array fields
-  are untouched: elements are neither trimmed, coalesced, nor dropped —
-  a `""` element in an `{:array, :string}` field passes through, so
-  validate against empty elements where they matter. Embed fields are not
-  accepted — cast them with `Ecto.Changeset.cast_embed/3` as usual.
-  Presence semantics are unchanged: normalization rewrites values, never
-  adds or removes keys, so an empty string coalescing to `nil` still
-  records a presence-visible nil-clear.
+  raw value and apply their own `cast/1`. `:binary` fields keep `""` as a
+  value (it is a valid binary). Array fields are untouched: elements are
+  neither coalesced nor dropped — a `""` element in an
+  `{:array, :string}` field passes through, so validate against empty
+  elements where they matter. Embed fields are not accepted — cast them
+  with `Ecto.Changeset.cast_embed/3` as usual. Presence semantics are
+  unchanged: normalization rewrites values, never adds or removes keys,
+  so an empty string coalescing to `nil` still records a presence-visible
+  nil-clear.
 
   Because `validate_required/2` consults the cast's `empty_values`, a
   literal `""` value satisfies required-ness after `cast_input/4`. For
@@ -152,15 +156,13 @@ defmodule Enact.InputSchema do
           Ecto.Changeset.t()
   def cast_input(base_or_changeset, params, fields, opts \\ [])
       when is_map(params) and is_list(fields) do
-    opts = Keyword.validate!(opts, keep_empty_strings: [], trim_except: [])
+    opts = Keyword.validate!(opts, keep_empty_strings: [])
     keep_empty = opts[:keep_empty_strings]
-    trim_except = opts[:trim_except]
 
     module = schema_module!(base_or_changeset)
     validate_string_fields!(keep_empty, ":keep_empty_strings", module, fields)
-    validate_string_fields!(trim_except, ":trim_except", module, fields)
 
-    params = normalize_strings(params, module, fields, keep_empty, trim_except)
+    params = normalize_strings(params, module, fields, keep_empty)
 
     Ecto.Changeset.cast(base_or_changeset, params, fields, empty_values: [])
   end
@@ -211,12 +213,12 @@ defmodule Enact.InputSchema do
     end)
   end
 
-  defp normalize_strings(params, module, fields, keep_empty, trim_except) do
+  defp normalize_strings(params, module, fields, keep_empty) do
     Enum.reduce(fields, params, fn field, params ->
       with :string <- module.__schema__(:type, field),
            {:ok, key, value} <- fetch_param(params, field),
            true <- is_binary(value) do
-        Map.put(params, key, normalize_string(value, field, keep_empty, trim_except))
+        Map.put(params, key, normalize_string(value, field, keep_empty))
       else
         _ -> params
       end
@@ -233,11 +235,11 @@ defmodule Enact.InputSchema do
     end
   end
 
-  defp normalize_string(value, field, keep_empty, trim_except) do
-    value = if field in trim_except, do: value, else: String.trim(value)
-
+  # emptiness uses a trimmed test (matching Ecto's default); the value
+  # itself is never modified
+  defp normalize_string(value, field, keep_empty) do
     cond do
-      value != "" -> value
+      String.trim(value) != "" -> value
       field in keep_empty -> ""
       true -> nil
     end

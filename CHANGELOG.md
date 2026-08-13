@@ -16,7 +16,6 @@ Initial release.
 - `Enact.Preview` with a confirmation digest binding action, mode, and the
   canonical updates map
 - `Enact.InputSchema.cast_input/4` — casting with JSON API empty-string
-  semantics derived from field types (`keep_empty_strings:` and
-  `trim_except:` options)
+  semantics derived from field types (`keep_empty_strings:` option)
 - `Enact.Test` helpers for host-app suites, including the
   `assert_rejects_empty_strings/3` behavioral probe

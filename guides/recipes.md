@@ -302,7 +302,7 @@ defmodule MyApp.Customers.Inputs.CustomerInput do
 end
 ```
 
-`cast_input/4` handles the whitespace normalization: `"   "` trims to `""`, which the `keep_empty_strings:` disposition keeps as the value rather than coalescing to `nil`.
+The emptiness test is trimmed, so `"   "` counts as empty, and the `keep_empty_strings:` disposition stores it as `""` rather than coalescing to `nil`.
 
 Explicit null is the remaining case. The field must never be null but may be blank, which `validate_required` cannot express: it rejects both `nil` and blank strings. Only presence distinguishes "omitted" (allowed — the column default applies) from "explicit null" (an error), so the rule lives in the action's `validate/2`:
 
@@ -317,4 +317,4 @@ def validate(changeset, ctx) do
 end
 ```
 
-The cases resolve as follows: `""` persists as `""`; `"   "` trims to `""`; explicit `null` returns a 422 on `:summary`; omitted leaves the field untouched, and create inserts fall to the column default. The drift test in the Testing guide catches any `""`-at-rest field wired with a plain cast.
+The cases resolve as follows: `""` persists as `""`; `"   "` counts as empty and persists as `""`; explicit `null` returns a 422 on `:summary`; omitted leaves the field untouched, and create inserts fall to the column default. The drift test in the Testing guide catches any `""`-at-rest field wired with a plain cast.
