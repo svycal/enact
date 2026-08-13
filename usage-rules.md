@@ -110,4 +110,4 @@ Omitted key → untouched. Explicit `null` → clears the scalar. Array key pres
 
 ## Worked examples
 
-End-to-end samples following these conventions — embedded data with batch resolution, flattening embeds into columns, reading resolver assigns in execute, MCP dry-run confirmation flows, empty-string-at-rest columns — live in the Recipes guide (`guides/recipes.md`).
+End-to-end samples following these conventions — embedded data with batch resolution, flattening embeds into columns, reading resolver assigns in execute, MCP dry-run confirmation flows, empty-string-at-rest columns, per-key merge on singular embeds — live in the Recipes guide (`guides/recipes.md`).

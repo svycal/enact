@@ -168,6 +168,6 @@ The runner emits `[:enact, :action, :run]`, `[:enact, :action, :run, :error]`, a
 - [Usage Rules](usage-rules.md) — the condensed do's and don'ts for writing actions; sync it into your agent instructions (CLAUDE.md / AGENTS.md) with [usage_rules](https://hex.pm/packages/usage_rules)
 - [Change Detection](guides/change-detection.md) — how the validation base, presence-gated extraction, and PATCH fidelity actually work, and why `force_changes:`-style workarounds never appear
 - [Phoenix Integration](guides/phoenix-integration.md) — actor/scope wiring, the reference FallbackController and error renderer, background jobs, telemetry
-- [Recipes](guides/recipes.md) — worked examples: embedded data end-to-end, flattening embeds into columns, reading resolver assigns, MCP dry-run confirmation flows, empty-string-at-rest columns
+- [Recipes](guides/recipes.md) — worked examples: embedded data end-to-end, flattening embeds into columns, reading resolver assigns, MCP dry-run confirmation flows, empty-string-at-rest columns, per-key merge on singular embeds
 - [Testing Host Applications](guides/testing.md) — copy-paste templates for the five host-side test obligations (cross-tenant sweep, PATCH/create matrices, projection completeness, resolver coverage, guardrails in CI)
 - [Design Specification](spec.md) — the authoritative design, including the rationale for every decision

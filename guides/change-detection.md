@@ -47,6 +47,8 @@ The updates map is atom-keyed at every level, and every atom comes from a schema
 
 For any provided key, one of two cases holds: a change exists, and `apply_changes` yields the casted value; or no change exists because the provided value equals the base value, and `apply_changes` yields that same value. In both cases the updates map contains what the caller provided.
 
+"Equals" here is Ecto's semantic equality (`Ecto.Type.equal?`), not structural equality. For types with multiple representations of one value — `Decimal` `1.0` versus `1.00` — a provided value semantically equal to the base records no change, and updates carry the base's representation. The persisted value is semantically what the caller sent; only its formatting can differ, and it is consistent between a dry run and the confirming run.
+
 The PATCH cases resolve as follows:
 
 | Caller sends              | Change recorded?         | In updates?          | Effect                    |

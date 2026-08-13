@@ -140,11 +140,16 @@ defmodule Enact.InputSchema do
   so an empty string coalescing to `nil` still records a presence-visible
   nil-clear.
 
-  Because `validate_required/2` consults the cast's `empty_values`, a
-  literal `""` value satisfies required-ness after `cast_input/4`. For
-  plain `:string` fields this changes nothing (empties are already `nil`
-  before validation); for `keep_empty_strings:` fields it means
-  `validate_required` expresses "never nil, `""` allowed".
+  Because `validate_required/2` consults the changeset's stored
+  `empty_values`, a literal `""` value satisfies required-ness when
+  `cast_input/4` created the changeset (the documented pattern — base as
+  the first argument). For plain `:string` fields this changes nothing
+  (empties are already `nil` before validation); for
+  `keep_empty_strings:` fields it means `validate_required` expresses
+  "never nil, `""` allowed". Note the stored `empty_values` comes from
+  whichever cast *created* the changeset — piping a stock `cast` into
+  `cast_input` keeps the stock default, under which `""` fails
+  required-ness.
 
   Required-ness, defaults, and null-rejection are out of scope; they stay
   in changeset heads, DB columns, and action `validate/2` respectively.
