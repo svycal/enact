@@ -99,13 +99,16 @@ defmodule Enact.InputSchema do
   @optional_callbacks from_subject: 1, partial_embeds: 1
 
   @doc """
-  Adopts the contract. Expands to exactly:
+  Adopts the contract: sets `@behaviour Enact.InputSchema` and imports
+  `cast_input/4`, nothing more.
+
+  Expands to exactly:
 
       @behaviour Enact.InputSchema
       import Enact.InputSchema, only: [cast_input: 3, cast_input: 4]
 
-  and will never inject more — `use Ecto.Schema`, `import Ecto.Changeset`,
-  and `@primary_key false` stay explicit in the module.
+  `use Ecto.Schema`, `import Ecto.Changeset`, and `@primary_key false`
+  stay explicit in the module.
   """
   defmacro __using__(_opts) do
     quote do
