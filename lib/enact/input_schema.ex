@@ -160,7 +160,7 @@ defmodule Enact.InputSchema do
     keep_empty = opts[:keep_empty_strings]
 
     module = schema_module!(base_or_changeset)
-    validate_string_fields!(keep_empty, ":keep_empty_strings", module, fields)
+    validate_string_fields!(keep_empty, :keep_empty_strings, module)
 
     params = normalize_strings(params, module, fields, keep_empty)
 
@@ -194,7 +194,7 @@ defmodule Enact.InputSchema do
   # schema-level check only: a listed field absent from this head's cast
   # list is inert, so option attributes can be shared across mode heads
   # with differing cast lists
-  defp validate_string_fields!(list, opt_name, module, _fields) do
+  defp validate_string_fields!(list, opt, module) do
     Enum.each(list, fn field ->
       case module.__schema__(:type, field) do
         :string ->
@@ -202,12 +202,12 @@ defmodule Enact.InputSchema do
 
         nil ->
           raise ArgumentError,
-                "#{opt_name} lists #{inspect(field)}, which does not exist on " <>
+                "#{inspect(opt)} lists #{inspect(field)}, which does not exist on " <>
                   inspect(module)
 
         _other ->
           raise ArgumentError,
-                "#{opt_name} lists #{inspect(field)}, which is not a :string field on " <>
+                "#{inspect(opt)} lists #{inspect(field)}, which is not a :string field on " <>
                   inspect(module)
       end
     end)
