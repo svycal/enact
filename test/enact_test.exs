@@ -563,4 +563,97 @@ defmodule EnactTest do
                        %{action: RaisingAfterCommit}}
     end
   end
+
+  ## merged/4
+
+  defmodule Flags do
+    use Ecto.Schema
+    import Ecto.Changeset
+
+    @primary_key false
+    embedded_schema do
+      field :a, :boolean
+      field :b, :boolean
+    end
+
+    def changeset(item, params), do: cast(item, params, [:a, :b])
+  end
+
+  defmodule ConfigInput do
+    use Ecto.Schema
+    use Enact.InputSchema
+    import Ecto.Changeset
+
+    @primary_key false
+    embedded_schema do
+      field :name, :string
+      embeds_one :flags, Flags
+    end
+
+    @impl Enact.InputSchema
+    def changeset(base, params, _mode) do
+      base |> cast_input(params, [:name]) |> cast_embed(:flags)
+    end
+
+    @impl Enact.InputSchema
+    def fields(_mode), do: [:name, :flags]
+  end
+
+  defmodule FlagsSubject do
+    defstruct flags: %{a: true, b: true}
+  end
+
+  defp merged_for(params, subject) do
+    ctx = Enact.Test.build_ctx(params: params, subject: subject, mode: :patch)
+    changeset = ConfigInput.changeset(%ConfigInput{}, params, :patch)
+    Enact.merged(changeset, ctx, :flags)
+  end
+
+  describe "merged/4" do
+    test "provided sub-keys read incoming; omitted sub-keys read current" do
+      assert merged_for(%{"flags" => %{"b" => false}}, %FlagsSubject{}) ==
+               %{a: true, b: false}
+    end
+
+    test "an explicitly-null sub-key reads nil, not the current value" do
+      assert merged_for(%{"flags" => %{"a" => nil}}, %FlagsSubject{}) == %{a: nil, b: true}
+    end
+
+    test "a wholly-omitted embed reads current values" do
+      assert merged_for(%{"name" => "x"}, %FlagsSubject{}) == %{a: true, b: true}
+    end
+
+    test "a whole-object null reads all nil (the object is being cleared)" do
+      assert merged_for(%{"flags" => nil}, %FlagsSubject{}) == %{a: nil, b: nil}
+    end
+
+    test "with no current object, unprovided keys read nil" do
+      assert merged_for(%{"flags" => %{"a" => false}}, %FlagsSubject{flags: nil}) ==
+               %{a: false, b: nil}
+
+      assert merged_for(%{"flags" => %{"a" => false}}, nil) == %{a: false, b: nil}
+    end
+
+    test "an explicit key list restricts the view" do
+      ctx =
+        Enact.Test.build_ctx(
+          params: %{"flags" => %{"b" => false}},
+          subject: %FlagsSubject{},
+          mode: :patch
+        )
+
+      changeset = ConfigInput.changeset(%ConfigInput{}, ctx.params, :patch)
+
+      assert Enact.merged(changeset, ctx, :flags, [:b]) == %{b: false}
+    end
+
+    test "a non-embed field raises a teaching error" do
+      ctx = Enact.Test.build_ctx(params: %{}, mode: :patch)
+      changeset = ConfigInput.changeset(%ConfigInput{}, %{}, :patch)
+
+      assert_raise ArgumentError, ~r/to be an embed/, fn ->
+        Enact.merged(changeset, ctx, :name)
+      end
+    end
+  end
 end

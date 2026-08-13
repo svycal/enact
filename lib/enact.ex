@@ -194,6 +194,11 @@ defmodule Enact do
   closed regardless of input. `Ecto.Changeset.cast` accepts the map
   as-is; just don't merge string-keyed entries into it.
 
+  For embeds declared in the input module's `partial_embeds/1` manifest,
+  the dumped map contains only the sub-keys the caller provided (an
+  explicitly-null sub-key is present as `nil`; an omitted one is absent).
+  See `Enact.InputSchema`.
+
   Never use bare `apply_changes/1` output for persistence — it erases
   omitted-vs-provided. For `input: nil` actions this returns `%{}`.
   """
@@ -205,9 +210,108 @@ defmodule Enact do
     |> Ecto.Changeset.apply_changes()
     |> dump(module)
     |> Map.take(provided)
+    |> filter_partial_embeds(module, ctx)
   end
 
   def updates(%Ecto.Changeset{}, %Context{}), do: %{}
+
+  @doc """
+  Builds the per-sub-key result-state view of a partial embed
+  (`partial_embeds/1`, see `Enact.InputSchema`) — the values the object
+  will hold after the write.
+
+  Each key reads the caller's casted value where the key was provided
+  (an explicit null reads as a clear) and the subject's current value
+  where it was not. It is used in two places:
+
+    * **`validate/2`** — rules about the merged result read it directly:
+
+          policy = Enact.merged(changeset, ctx, :booking_policy)
+
+          if policy.allow_booking or policy.allow_reschedule,
+            do: changeset,
+            else: add_error(changeset, :booking_policy, "must keep one option enabled")
+
+    * **`execute/2`** — it computes the merged object to persist, using
+      the same definition validation saw:
+
+          %{updates | booking_policy: Enact.merged(changeset, ctx, :booking_policy)}
+
+  Do not build this view with `get_change(...) || ctx.subject.field`:
+  `get_change` returns `nil` both when there is no change and when the
+  change is `nil`, so the fallback returns the old value when the caller
+  sends an explicit null. Presence-gating handles nil-clears correctly.
+
+  The key list defaults to the embed's scalar fields, derived from the
+  schema; pass an explicit list to restrict it. Cases:
+
+    * sub-key provided → the casted incoming value (explicit null → `nil`)
+    * sub-key omitted → the subject's current value
+    * whole embed omitted → every key reads the current value
+    * whole embed explicitly null → every key reads `nil` (the object is
+      being cleared)
+    * no current object (create mode, or a nil subject value) → unprovided
+      keys read `nil`
+
+  Returns a plain atom-keyed map. On an already-invalid changeset the
+  incoming values may be incomplete (there is no cast-stage fast-fail);
+  gate such rules with `Enact.Validations.check/2` where that matters.
+  """
+  @spec merged(Ecto.Changeset.t(), Context.t(), atom(), [atom()] | nil) :: map()
+  def merged(changeset, ctx, embed, keys \\ nil)
+
+  def merged(%Ecto.Changeset{} = changeset, %Context{} = ctx, embed, keys)
+      when is_atom(embed) do
+    keys = keys || derive_embed_keys!(changeset, embed)
+    incoming = Ecto.Changeset.get_field(changeset, embed)
+    current = ctx.subject && Map.get(ctx.subject, embed)
+
+    if provided?(ctx, embed) and is_nil(incoming) do
+      # whole-object explicit null: the object is being cleared
+      Map.from_keys(keys, nil)
+    else
+      Map.new(keys, fn key ->
+        source = if provided?(ctx, [embed, key]), do: incoming, else: current
+        {key, source && Map.get(source, key)}
+      end)
+    end
+  end
+
+  defp derive_embed_keys!(%Ecto.Changeset{data: %module{}}, embed) do
+    unless embed in module.__schema__(:embeds) do
+      raise ArgumentError,
+            "merged/4 expects #{inspect(embed)} to be an embed on #{inspect(module)}"
+    end
+
+    related = module.__schema__(:embed, embed).related
+    related.__schema__(:fields) -- related.__schema__(:embeds)
+  end
+
+  defp derive_embed_keys!(%Ecto.Changeset{}, embed) do
+    raise ArgumentError,
+          "merged/4 cannot derive keys for #{inspect(embed)} on a schemaless " <>
+            "changeset — pass the key list explicitly"
+  end
+
+  # sub-key presence filtering for declared partial embeds: caller-said
+  # interpretation only — the world-merge stays in execute/2
+  defp filter_partial_embeds(updates, module, ctx) do
+    Enum.reduce(partial_embeds(module, ctx.mode), updates, fn field, updates ->
+      case updates do
+        %{^field => %{} = value} ->
+          provided = Enum.filter(Map.keys(value), &provided?(ctx, [field, &1]))
+          %{updates | field => Map.take(value, provided)}
+
+        # absent (untouched) or nil (explicit whole-object clear)
+        _ ->
+          updates
+      end
+    end)
+  end
+
+  defp partial_embeds(module, mode) do
+    if function_exported?(module, :partial_embeds, 1), do: module.partial_embeds(mode), else: []
+  end
 
   # unwraps embed structs into plain maps, recursively; only fields the
   # schema declares as embeds are touched, so scalar structs (Date,

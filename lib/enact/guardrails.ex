@@ -157,5 +157,32 @@ defmodule Enact.Guardrails do
       docs.\
       """
     end
+
+    if mode != nil and function_exported?(module, :partial_embeds, 1) do
+      embeds = module.__schema__(:embeds)
+
+      Enum.each(module.partial_embeds(mode), fn field ->
+        cond do
+          field not in embeds ->
+            raise ArgumentError, """
+            input schema #{inspect(module)} declares partial_embeds entry \
+            #{inspect(field)}, which is not an embed on the schema.\
+            """
+
+          module.__schema__(:embed, field).cardinality != :one ->
+            raise ArgumentError, """
+            input schema #{inspect(module)} declares partial_embeds entry \
+            #{inspect(field)}, which is an embeds_many.
+
+            Partial semantics require embeds_one: arrays replace wholesale, and \
+            merging array items requires item identity — a different contract. \
+            See the Enact.InputSchema docs.\
+            """
+
+          true ->
+            :ok
+        end
+      end)
+    end
   end
 end

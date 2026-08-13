@@ -47,6 +47,8 @@ The updates map is atom-keyed at every level, and every atom comes from a schema
 
 For any provided key, one of two cases holds: a change exists, and `apply_changes` yields the casted value; or no change exists because the provided value equals the base value, and `apply_changes` yields that same value. In both cases the updates map contains what the caller provided.
 
+Embeds declared in the input module's `partial_embeds/1` manifest extend presence one level down: their dumped maps contain only the sub-keys the caller provided, with the same omitted-vs-null fidelity as top-level fields. See recipe 6 in the Recipes guide for the merge pattern.
+
 "Equals" here is Ecto's semantic equality (`Ecto.Type.equal?`), not structural equality. For types with multiple representations of one value — `Decimal` `1.0` versus `1.00` — a provided value semantically equal to the base records no change, and updates carry the base's representation. The persisted value is semantically what the caller sent; only its formatting can differ, and it is consistent between a dry run and the confirming run.
 
 The PATCH cases resolve as follows:

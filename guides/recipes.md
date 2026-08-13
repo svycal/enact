@@ -319,17 +319,15 @@ end
 
 The cases resolve as follows: `""` persists as `""`; `"   "` counts as empty and persists as `""`; explicit `null` returns a 422 on `:summary`; omitted leaves the field untouched, and create inserts fall to the column default. The drift test in the Testing guide catches any `""`-at-rest field wired with a plain cast.
 
-## 6. Per-key merge on a singular embed
+## 6. Partial updates on a singular embed
 
-The default embed contract is replace-wholesale. For a singular config object — a `booking_policy` with several flags — that forces callers to send the whole object to change one flag. Per-key merge is a legitimate alternative for `embeds_one` fields, implemented as a declared interpretation in `execute/2` using `Enact.provided?/2`'s path form. (It is not suitable for `embeds_many` — merging arrays requires item identity, which is a different contract.)
-
-The caller sends a partial object; omitted keys inside it stay untouched:
+The default embed contract is replace-wholesale. For a singular config object — a `booking_policy` with several flags — that forces callers to send the whole object to change one flag. Declaring the embed in the input module's `partial_embeds/1` manifest switches it to partial-object semantics: `Enact.updates/2` filters its sub-keys by presence, so the updates map, previews, and confirmation digests carry exactly what the caller sent, one level down. (`embeds_many` cannot be declared partial — merging arrays requires item identity, which is a different contract; the guardrails enforce this.)
 
 ```json
 PATCH { "booking_policy": { "allow_booking": false } }
 ```
 
-The item schema stays shape-only. Partial sends cast over an empty struct, so `validate_required` here would wrongly reject them; rules that need the merged result read `ctx.subject` in the action's `validate/2`:
+The item schema stays shape-only. Partial sends cast over an empty struct, so `validate_required` here would wrongly reject them:
 
 ```elixir
 # lib/my_app/scheduling/inputs/booking_policy_input.ex
@@ -349,90 +347,122 @@ defmodule MyApp.Scheduling.Inputs.BookingPolicyInput do
 end
 ```
 
-The action merges only the paths the caller sent over the current policy. `provided?/2` distinguishes an omitted key (survives) from an explicitly-null key (merges as a clear) — the same omitted-vs-null fidelity as the top level, one layer down:
-
 ```elixir
-# lib/my_app/scheduling/actions/update_link.ex
-defmodule MyApp.Scheduling.Actions.UpdateLink do
-  use Enact.Action
+# lib/my_app/scheduling/inputs/link_input.ex
+defmodule MyApp.Scheduling.Inputs.LinkInput do
+  use Ecto.Schema
+  use Enact.InputSchema
+  import Ecto.Changeset
 
-  alias MyApp.Scheduling
-  alias MyApp.Scheduling.Inputs.LinkInput
-  alias MyApp.Scheduling.Link
-
-  @impl Enact.Action
-  def config, do: [mode: :patch, loads_subject?: true]
-
-  @impl Enact.Action
-  def input, do: LinkInput
-
-  @impl Enact.Action
-  def load(%{"id" => id}, ctx), do: Scheduling.get_link(ctx.actor, id)
-
-  @impl Enact.Action
-  def execute(changeset, ctx) do
-    updates =
-      changeset
-      |> Enact.updates(ctx)
-      |> merge_booking_policy(ctx)
-
-    ctx.subject
-    |> Link.changeset(updates)
-    |> ctx.repo.update()
+  @primary_key false
+  embedded_schema do
+    field :name, :string
+    embeds_one :booking_policy, MyApp.Scheduling.Inputs.BookingPolicyInput
   end
 
-  @policy_keys ~w(allow_booking allow_reschedule)a
+  @impl Enact.InputSchema
+  def changeset(base, params, _mode) do
+    base
+    |> cast_input(params, [:name])
+    |> cast_embed(:booking_policy)
+  end
 
-  defp merge_booking_policy(updates, ctx) do
-    case Map.fetch(updates, :booking_policy) do
-      # omitted → untouched
-      :error ->
-        updates
+  @impl Enact.InputSchema
+  def fields(_mode), do: [:name, :booking_policy]
 
-      # explicit null → clear the whole object
-      {:ok, nil} ->
-        updates
+  @impl Enact.InputSchema
+  def from_subject(link), do: %__MODULE__{name: link.name}
 
-      # provided → merge provided paths over the current policy
-      {:ok, policy} ->
-        provided = Enum.filter(@policy_keys, &Enact.provided?(ctx, [:booking_policy, &1]))
+  @impl Enact.InputSchema
+  def partial_embeds(_mode), do: [:booking_policy]
+end
+```
 
-        merged =
-          ctx.subject.booking_policy
-          |> Map.from_struct()
-          |> Map.merge(Map.take(policy, provided))
+`execute/2` merges the partial object over the current value using `Enact.merged/4` — the same function merged-result validations use, so the merge semantics have one definition:
 
-        %{updates | booking_policy: merged}
-    end
+```elixir
+@impl Enact.Action
+def execute(changeset, ctx) do
+  updates =
+    changeset
+    |> Enact.updates(ctx)
+    |> merge_booking_policy(changeset, ctx)
+
+  ctx.subject
+  |> Link.changeset(updates)
+  |> ctx.repo.update()
+end
+
+defp merge_booking_policy(updates, changeset, ctx) do
+  case Map.fetch(updates, :booking_policy) do
+    # provided → the result-state view is the merged object
+    {:ok, %{}} ->
+      %{updates | booking_policy: Enact.merged(changeset, ctx, :booking_policy)}
+
+    # omitted (untouched) or explicit null (clears the whole object)
+    _ ->
+      updates
   end
 end
 ```
 
-When the policy is stored as flat columns instead of an embed, the merge disappears: write only the provided paths as columns, and omitted columns stay out of the write — untouched by the same presence semantics that protect top-level fields:
+When the policy is stored as flat columns instead of an embed, the merge disappears: provided sub-keys become columns, and omitted columns stay out of the write — untouched by the same presence semantics that protect top-level fields:
 
 ```elixir
 defp flatten_booking_policy(updates, ctx) do
   case Map.fetch(updates, :booking_policy) do
-    :error ->
+    {:ok, %{} = partial} ->
       updates
+      |> Map.delete(:booking_policy)
+      # atoms derive from the input schema's closed field set
+      |> Map.merge(Map.new(partial, fn {key, value} -> {:"policy_#{key}", value} end))
 
     {:ok, nil} ->
       updates
       |> Map.delete(:booking_policy)
       |> Map.merge(%{policy_allow_booking: nil, policy_allow_reschedule: nil})
 
-    {:ok, policy} ->
-      provided = Enum.filter(@policy_keys, &Enact.provided?(ctx, [:booking_policy, &1]))
-
+    :error ->
       updates
-      |> Map.delete(:booking_policy)
-      # atoms come from the closed @policy_keys list, never from client input
-      |> Map.merge(Map.new(provided, fn key -> {:"policy_#{key}", Map.get(policy, key)} end))
   end
 end
 ```
 
-Two caveats:
+The cases resolve as follows: a provided sub-key merges; an explicitly-null sub-key is present as `nil` and clears that flag; an omitted sub-key is absent and stays untouched; a null for the whole object clears everything. Previews and digests contain exactly the provided sub-keys, so the user confirms the partial change itself.
 
-- **Validations see the partial object, not the merged result.** The cast policy struct has `nil` for omitted keys. A rule about the merged policy ("at least one of the flags must remain enabled") belongs in the action's `validate/2`, reading `ctx.subject.booking_policy` for the current values and `provided?/2` for the incoming ones.
-- **Previews show the raw cast, not the merge.** `preview.updates.booking_policy` contains `nil` for omitted keys even though the merge will not write them. A confirmation surface (recipe 4) should filter the displayed object to provided paths with the same `provided?/2` calls. The digest is unaffected — it binds the same pre-merge map on both the dry run and the confirming run.
+### Validating the merged result
+
+Validations see the partially-cast object, not the merged result — the base never seeds embeds, so `get_field` on the item changeset returns `nil` for omitted sub-keys. Per-key intrinsic rules (formats, bounds) still work in the item schema, since Ecto validators skip absent and nil changes. But a rule about the *merged* policy belongs in the action's `validate/2`, against the result-state view built by `Enact.merged/4` — the same function the execute merge uses:
+
+```elixir
+@impl Enact.Action
+def validate(changeset, ctx) do
+  policy = Enact.merged(changeset, ctx, :booking_policy)
+
+  if policy.allow_booking or policy.allow_reschedule do
+    changeset
+  else
+    add_error(changeset, :booking_policy, "must keep at least one option enabled")
+  end
+end
+```
+
+`merged/4` reads each sub-key from the caller's casted value where provided — including explicit nulls, which correctly read as clears — and from `ctx.subject` where not. The key list derives from the schema by default. See its documentation for the full case table (whole-object nulls, missing current objects).
+
+### Displaying partial changes in a confirmation flow
+
+A confirmation preview serves two purposes. The digest binds the delta: the exact change the user confirms. The display provides context: the current and resulting values. Bind the delta; display both. Extending recipe 4's response shape:
+
+```elixir
+current = Scheduling.serialize(link).booking_policy
+resulting = Map.merge(current, preview.updates.booking_policy)
+
+%{
+  changes: preview.updates,                  # the delta; bound by the digest
+  current: %{booking_policy: current},
+  resulting: %{booking_policy: resulting},   # display context; not digest-bound
+  confirm_digest: preview.digest
+}
+```
+
+`resulting` is computed against current state, which can change before the confirming run. The design makes no reservation: the confirming run re-validates against current state, and the confirmed delta is what executes.

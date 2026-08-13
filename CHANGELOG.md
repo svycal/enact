@@ -17,5 +17,10 @@ Initial release.
   canonical updates map
 - `Enact.InputSchema.cast_input/4` — casting with JSON API empty-string
   semantics derived from field types (`keep_empty_strings:` option)
+- `partial_embeds/1` input-schema manifest — partial-object PATCH
+  semantics for declared `embeds_one` fields, with presence-faithful
+  updates, previews, and confirmation digests
+- `Enact.merged/4` — the result-state view of a partial embed,
+  shared by merged-result validation rules and the execute-side merge
 - `Enact.Test` helpers for host-app suites, including the
   `assert_rejects_empty_strings/3` behavioral probe

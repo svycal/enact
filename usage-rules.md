@@ -78,6 +78,7 @@ end
 - Required-ness lives in the changeset heads via `validate_required`, never in the schema. Per-mode differences are expressed as data (cast lists, required lists) — if you need conditionals inside the changeset heads, split into separate input modules.
 - `fields/1` must list the mode's castable fields **including embed names** — `Enact.updates/2` and the host test suite read it.
 - Nested item schemas implement Ecto's native `changeset/2` (invoked by `cast_embed`) and do **not** adopt the behaviour — take the bare `import Enact.InputSchema` and still cast with `cast_input/4`. This asymmetry is deliberate. Note the strictness probe covers top-level fields only (item schemas have no `fields/1` manifest), so item-level strictness is a convention, not a probed guarantee.
+- Embeds are replace-wholesale by default. Declare `embeds_one` fields that accept partial objects in the optional `partial_embeds/1` manifest — `Enact.updates/2` then carries only the provided sub-keys, and `execute/2` merges over the subject via `Enact.merged/4` (the same function merged-result validations use). `embeds_many` cannot be partial. Worked example: recipe 6.
 - `from_subject/1` is an explicit projection of the subject into the input vocabulary (public-id rendering, renames), total over scalar fields. Never seed embeds — leave them at structural defaults. Never implement it as a blind `Map.take`.
 - Pair with the data-layer convention: optional scalar columns are **nullable with no default** — `NULL` is the single representation of empty, so empty strings coalescing to `nil` is correct and an explicit `null` is just a clear. Reserve `NOT NULL DEFAULT ''` for fields where `""` is genuinely meaningful as distinct from absent; list those in `cast_input/4`'s `keep_empty_strings:` — see the Change Detection guide.
 
@@ -87,6 +88,7 @@ end
 - Read result-state with `get_field/2` — the patch base guarantees it returns the value the record will have. **Forbidden:** `get_change(cs, :field) || ctx.subject.field`.
 - Wrap every DB-backed check in `Enact.Validations.check/2` (no-ops when the changeset is already invalid). Use `Enact.Validations.unique/3` for scoped uniqueness pre-flight.
 - Gate rules that must run only when the caller touched a key — including `[]`-clears, which `get_change`-gating would miss — with `Enact.provided?(ctx, key_or_path)`. That is the only sanctioned raw-params read in a validation.
+- For rules about the merged result of a partial embed, build the result-state view with `Enact.merged(changeset, ctx, :embed)` — each sub-key reads the caller's value where provided (explicit nulls read as clears) and the subject's current value where not.
 
 ## PATCH semantics
 
@@ -110,4 +112,4 @@ Omitted key → untouched. Explicit `null` → clears the scalar. Array key pres
 
 ## Worked examples
 
-End-to-end samples following these conventions — embedded data with batch resolution, flattening embeds into columns, reading resolver assigns in execute, MCP dry-run confirmation flows, empty-string-at-rest columns, per-key merge on singular embeds — live in the Recipes guide (`guides/recipes.md`).
+End-to-end samples following these conventions — embedded data with batch resolution, flattening embeds into columns, reading resolver assigns in execute, MCP dry-run confirmation flows, empty-string-at-rest columns, partial updates on singular embeds — live in the Recipes guide (`guides/recipes.md`).
