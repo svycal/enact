@@ -122,6 +122,19 @@ defmodule EnactTest do
     def execute(changeset, ctx), do: {:ok, Enact.updates(changeset, ctx)}
   end
 
+  defmodule RaisingAfterCommit do
+    use Enact.Action
+
+    @impl Enact.Action
+    def input, do: nil
+
+    @impl Enact.Action
+    def execute(_changeset, _ctx), do: {:ok, :done}
+
+    @impl Enact.Action
+    def after_commit(_result, _ctx), do: raise("side effect boom")
+  end
+
   defmodule FailingExecuteAction do
     use Enact.Action
 
@@ -163,6 +176,36 @@ defmodule EnactTest do
 
     test "authenticated actors may still call anonymous-capable actions" do
       assert {:ok, :user} = run(PublicAction, %{})
+    end
+  end
+
+  ## Option validation
+
+  describe "option validation" do
+    test "unknown run options raise" do
+      assert_raise ArgumentError, ~r/asigns/, fn ->
+        Enact.run(CreateProject, @valid_create, [actor: :user, asigns: %{}] ++ @repo)
+      end
+    end
+
+    test "a misspelled confirm_digest cannot silently skip confirmation" do
+      assert_raise ArgumentError, ~r/confirm_diget/, fn ->
+        Enact.run(
+          CreateProject,
+          @valid_create,
+          [actor: :user, confirm_diget: "sha256:x"] ++ @repo
+        )
+      end
+    end
+
+    test "dry_run rejects confirm_digest" do
+      assert_raise ArgumentError, ~r/confirm_digest/, fn ->
+        Enact.dry_run(
+          CreateProject,
+          @valid_create,
+          [actor: :user, confirm_digest: "sha256:x"] ++ @repo
+        )
+      end
     end
   end
 
@@ -482,7 +525,7 @@ defmodule EnactTest do
 
       :telemetry.attach_many(
         handler_id,
-        [[:enact, :action, :success], [:enact, :action, :error]],
+        [[:enact, :action, :run], [:enact, :action, :run, :error]],
         fn event, measurements, metadata, pid ->
           send(pid, {:telemetry, event, measurements, metadata})
         end,
@@ -493,20 +536,31 @@ defmodule EnactTest do
       :ok
     end
 
-    test "success emits [:enact, :action, :success]" do
+    test "success emits [:enact, :action, :run]" do
       assert {:ok, _} = run(CreateProject, @valid_create)
 
-      assert_received {:telemetry, [:enact, :action, :success], %{duration: duration},
+      assert_received {:telemetry, [:enact, :action, :run], %{duration: duration},
                        %{action: CreateProject, mode: :create, actor: :user}}
 
       assert is_integer(duration)
     end
 
-    test "failure emits [:enact, :action, :error] with the error type" do
+    test "failure emits [:enact, :action, :run, :error] with the error type" do
       assert {:error, _} = run(ForbiddenAction, @valid_create)
 
-      assert_received {:telemetry, [:enact, :action, :error], _measurements,
+      assert_received {:telemetry, [:enact, :action, :run, :error], _measurements,
                        %{action: ForbiddenAction, type: :forbidden}}
+    end
+
+    test "a raising after_commit propagates, but the write committed and the run event fired" do
+      assert_raise RuntimeError, "side effect boom", fn ->
+        run(RaisingAfterCommit, %{})
+      end
+
+      assert_received {FakeRepo, :transaction}
+
+      assert_received {:telemetry, [:enact, :action, :run], _measurements,
+                       %{action: RaisingAfterCommit}}
     end
   end
 end

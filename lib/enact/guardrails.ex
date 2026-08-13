@@ -5,9 +5,11 @@ defmodule Enact.Guardrails do
   conventions to invariants.
 
   The runner invokes `assert_valid_input_schema!/2` automatically on an
-  action's first run (memoized per action). Host apps should *also* call
-  it from a CI test on every action's input module for compile-adjacent
-  feedback:
+  action's first run (memoized per action). The memoization lives in
+  `:persistent_term` and survives dev code reloads, so editing an input
+  schema in a running server does not re-trigger the check until restart —
+  another reason host apps should *also* call it from a CI test on every
+  action's input module for compile-adjacent feedback:
 
       for action <- MyApp.Actions.all(), input = action.input() do
         Enact.Guardrails.assert_valid_input_schema!(input,

@@ -72,7 +72,9 @@ defmodule Enact.Action do
   @doc """
   Post-commit side effects (job insertion, analytics). Runs strictly after
   a successful commit, outside the transaction; its return value is
-  ignored and it never rolls back.
+  ignored and it never rolls back. A raise propagates to the caller, but
+  the write is already committed and the success telemetry event has
+  already been emitted — the audit trail records the write either way.
   """
   @callback after_commit(result :: term(), ctx :: Context.t()) :: term()
 

@@ -25,6 +25,10 @@ defmodule Enact do
       Never pass pre-loaded domain records here — record fetching belongs
       in `load/2` (URL subject) or `resolvers/0` (body references).
 
+  Unknown options raise `ArgumentError` — a misspelled option (an
+  `assigns:` typo, or worse, a `confirm_digest:` typo silently skipping
+  the confirmation check) must never be ignored.
+
   ## Error normalization
 
     * `load/2` returning `nil` → `:not_found`
@@ -41,10 +45,14 @@ defmodule Enact do
   `%{action:, mode:, actor:}`; error events additionally carry `type:`,
   the `Enact.Error` type):
 
-    * `[:enact, :action, :success]` / `[:enact, :action, :error]`
+    * `[:enact, :action, :run]` / `[:enact, :action, :run, :error]`
     * `[:enact, :action, :dry_run]` / `[:enact, :action, :dry_run, :error]`
       — distinct events so attempt-counting and audit trails never
       conflate previews with real executions
+
+  The run event fires after a successful commit but before
+  `after_commit/2` runs, so a raising side effect cannot suppress the
+  audit record of a committed write.
   """
 
   alias Enact.{Actor, Context, Error, Preview}
@@ -63,19 +71,24 @@ defmodule Enact do
   """
   @spec run(module(), map(), keyword()) :: {:ok, term()} | {:error, Error.t()}
   def run(action, params, opts) when is_atom(action) and is_map(params) and is_list(opts) do
+    Keyword.validate!(opts, [:actor, :repo, :assigns, :confirm_digest])
     {config, ctx} = build(action, params, opts)
     start = System.monotonic_time()
 
-    result =
-      with {:ok, changeset, ctx, _resolved} <- pre_execute(action, config, ctx),
-           :ok <- check_digest(action, changeset, ctx, opts),
-           {:ok, result} <- persist(action, changeset, ctx) do
-        action.after_commit(result, ctx)
-        {:ok, result}
-      end
-
-    emit(result, :run, action, ctx, start)
-    result
+    with {:ok, changeset, ctx, _resolved} <- pre_execute(action, config, ctx),
+         :ok <- check_digest(action, changeset, ctx, opts),
+         {:ok, result} <- persist(action, changeset, ctx) do
+      # the success event fires after commit but before after_commit/2, so
+      # a raising side effect cannot suppress the audit record of a
+      # committed write
+      emit({:ok, result}, :run, action, ctx, start)
+      action.after_commit(result, ctx)
+      {:ok, result}
+    else
+      {:error, %Error{}} = error ->
+        emit(error, :run, action, ctx, start)
+        error
+    end
   end
 
   @doc """
@@ -91,6 +104,7 @@ defmodule Enact do
   """
   @spec dry_run(module(), map(), keyword()) :: {:ok, Preview.t()} | {:error, Error.t()}
   def dry_run(action, params, opts) when is_atom(action) and is_map(params) and is_list(opts) do
+    Keyword.validate!(opts, [:actor, :repo, :assigns])
     {config, ctx} = build(action, params, opts)
     start = System.monotonic_time()
 
@@ -399,7 +413,7 @@ defmodule Enact do
   defp emit({:ok, _result}, kind, action, ctx, start) do
     event =
       case kind do
-        :run -> [:enact, :action, :success]
+        :run -> [:enact, :action, :run]
         :dry_run -> [:enact, :action, :dry_run]
       end
 
@@ -413,7 +427,7 @@ defmodule Enact do
   defp emit({:error, %Error{type: type}}, kind, action, ctx, start) do
     event =
       case kind do
-        :run -> [:enact, :action, :error]
+        :run -> [:enact, :action, :run, :error]
         :dry_run -> [:enact, :action, :dry_run, :error]
       end
 

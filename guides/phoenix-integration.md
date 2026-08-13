@@ -233,8 +233,8 @@ The runner emits telemetry events for every action. Attach a handler for metrics
 :telemetry.attach_many(
   "enact-audit",
   [
-    [:enact, :action, :success],
-    [:enact, :action, :error],
+    [:enact, :action, :run],
+    [:enact, :action, :run, :error],
     [:enact, :action, :dry_run],
     [:enact, :action, :dry_run, :error]
   ],

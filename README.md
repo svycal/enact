@@ -157,7 +157,7 @@ A digest mismatch returns `:conflict` — "the user confirmed this exact change"
 
 ## Telemetry
 
-The runner emits `[:enact, :action, :success]`, `[:enact, :action, :error]`, and distinct `[:enact, :action, :dry_run]` events with per-action, per-type metadata — observability and audit trails with zero action-author involvement.
+The runner emits `[:enact, :action, :run]`, `[:enact, :action, :run, :error]`, and distinct `[:enact, :action, :dry_run]` events with per-action, per-type metadata — observability and audit trails with zero action-author involvement.
 
 ## Testing
 
