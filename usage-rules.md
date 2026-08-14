@@ -86,7 +86,7 @@ end
 
 - Payload-intrinsic rules (format, bounds, inclusion) → the input module's own pipeline. Operation- and actor-aware rules → the action's `validate/2`. Dividing line: "true of this data anywhere" vs. "true in this operation."
 - Read result-state with `get_field/2` — the patch base guarantees it returns the value the record will have. **Forbidden:** `get_change(cs, :field) || ctx.subject.field`.
-- Wrap every DB-backed check in `Enact.Validations.check/2` (no-ops when the changeset is already invalid). Use `Enact.Validations.unique/3` for scoped uniqueness pre-flight.
+- Wrap every DB-backed check in `Enact.Validations.check/2` (no-ops when the changeset is already invalid). Use `Enact.Validations.unique/3` for scoped uniqueness pre-flight. On PATCH pass `except: ctx.subject`. Filter soft-deletes on `:query`.
 - Gate rules that must run only when the caller touched a key — including `[]`-clears, which `get_change`-gating would miss — with `Enact.provided?(ctx, key_or_path)`. That is the only sanctioned raw-params read in a validation.
 - For rules about the merged result of a partial embed, build the result-state view with `Enact.merged(changeset, ctx, :embed)` — each sub-key reads the caller's value where provided (explicit nulls read as clears) and the subject's current value where not.
 

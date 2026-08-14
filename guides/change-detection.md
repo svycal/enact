@@ -88,7 +88,7 @@ The default cast behavior is correct when optional scalar columns are nullable w
 
 Two behaviors read the change list, and both skips are correct:
 
-- `Enact.Validations.unique/3` skips fields with no change. A value identical to the current one is already persisted and would match the record itself.
+- `Enact.Validations.unique/3` skips fields with no change. A value identical to the current one is already persisted and would match the record itself. When the field *is* changing, pass `except: ctx.subject` so the current row is not treated as a collision.
 - Resolution skips `nil` reference values, since a clear resolves nothing. Resolution itself is presence-gated: a reference provided with a value identical to the current one still resolves, so a non-nil reference in updates always has a corresponding entry in `ctx.assigns`.
 
 In your own validations, read values with `get_field/2` and detect providedness with `Enact.provided?/2`. Use `provided?/2` for rules that run only when the caller included a key, including `[]`-clears, which a `get_change`-based check would miss.

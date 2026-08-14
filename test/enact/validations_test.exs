@@ -9,7 +9,7 @@ defmodule Enact.ValidationsTest do
   defmodule ProjectRecord do
     use Ecto.Schema
 
-    @primary_key false
+    @primary_key {:id, :id, autogenerate: false}
     schema "projects" do
       field :slug, :string
       field :org_id, :integer
@@ -73,6 +73,72 @@ defmodule Enact.ValidationsTest do
 
       assert_received {FakeRepo, :exists?, query}
       assert inspect(query) =~ "org_id"
+    end
+
+    test "except: a struct excludes it by primary key" do
+      Process.put(:fake_repo_exists?, false)
+      current = %ProjectRecord{id: 7, slug: "x"}
+
+      unique(changeset(%{"slug" => "x"}), :slug,
+        query: ProjectRecord,
+        repo: FakeRepo,
+        except: current
+      )
+
+      assert_received {FakeRepo, :exists?, query}
+      inspected = inspect(query)
+      assert inspected =~ "id"
+      assert inspected =~ "7"
+    end
+
+    test "except: an id excludes that id column" do
+      Process.put(:fake_repo_exists?, false)
+
+      unique(changeset(%{"slug" => "x"}), :slug,
+        query: ProjectRecord,
+        repo: FakeRepo,
+        except: 7
+      )
+
+      assert_received {FakeRepo, :exists?, query}
+      inspected = inspect(query)
+      assert inspected =~ "id"
+      assert inspected =~ "7"
+    end
+
+    test "except: a keyword excludes those columns" do
+      Process.put(:fake_repo_exists?, false)
+
+      unique(changeset(%{"slug" => "x"}), :slug,
+        query: ProjectRecord,
+        repo: FakeRepo,
+        except: [id: 7]
+      )
+
+      assert_received {FakeRepo, :exists?, query}
+      inspected = inspect(query)
+      assert inspected =~ "id"
+      assert inspected =~ "7"
+    end
+
+    test "except: raises on a nil primary key" do
+      assert_raise ArgumentError, ~r/except: :id is nil/, fn ->
+        unique(changeset(%{"slug" => "x"}), :slug,
+          query: ProjectRecord,
+          repo: FakeRepo,
+          except: %ProjectRecord{slug: "x"}
+        )
+      end
+    end
+
+    test "except: raises on an unknown value" do
+      assert_raise ArgumentError, ~r/expected a struct, id, or keyword/, fn ->
+        unique(changeset(%{"slug" => "x"}), :slug,
+          query: ProjectRecord,
+          repo: FakeRepo,
+          except: :nope
+        )
+      end
     end
 
     test "composes with check/2 so garbage input never queries" do

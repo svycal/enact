@@ -1,6 +1,6 @@
 # Testing Host Applications
 
-Enact's own suite covers the pipeline mechanics. Five test obligations belong to the host application because they depend on your actions, schemas, and tenancy model. This guide provides templates for each. `import Enact.Test` provides `assert_invalid/2`, `build_ctx/1`, and `errors_on/1` throughout.
+Enact's own suite covers the pipeline mechanics. Five test obligations belong to the host application because they depend on your actions, schemas, and tenancy model. This guide provides templates for each. Import only the helpers you need — `import Enact.Test, only: [assert_invalid: 2, assert_rejects_empty_strings: 2, build_ctx: 1]`. Phoenix `DataCase` already defines `errors_on/1`; use that, or call `Enact.Test.errors_on/1` if the host has no helper. A blanket `import Enact.Test` will collide on `errors_on/1`.
 
 ## The action registry
 
@@ -25,9 +25,10 @@ test "the registry lists every action module" do
 
   implemented =
     for mod <- modules,
-        {:ok, _} = Code.ensure_loaded(mod),
-        behaviours = mod.module_info(:attributes) |> Keyword.get_values(:behaviour) |> List.flatten(),
-        Enact.Action in behaviours,
+        match?({:module, _}, Code.ensure_loaded(mod)),
+        Enact.Action in List.flatten(
+          Keyword.get_values(mod.module_info(:attributes), :behaviour)
+        ),
         do: mod
 
   assert Enum.sort(implemented) == Enum.sort(MyApp.Actions.all())
