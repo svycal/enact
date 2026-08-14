@@ -88,6 +88,62 @@ defmodule MyAppWeb.ProjectController do
 end
 ```
 
+## Inertia / HTML form posts
+
+JSON controllers can `with` on `Enact.run/3` because success is a render and every error is a status. Inertia form posts are different: success, `:invalid`, and `:conflict` are Phoenix `redirect/2` (Inertia intercepts those). `:invalid` in particular is not a 422 page — `assign_errors/2` (from [inertia-phoenix](https://github.com/inertiajs/inertia-phoenix)) stashes the changeset and the next GET paints the form. That is the Inertia contract, not Enact's.
+
+`:forbidden`, `:not_found`, and `:internal` still belong to `action_fallback`. Return the error tuple; do not call the fallback module from the helper. `action_fallback` only runs when the action returns something other than a `%Plug.Conn{}`.
+
+```elixir
+# lib/my_app_web/enact.ex
+defmodule MyAppWeb.Enact do
+  import Inertia.Controller
+  import Phoenix.Controller
+
+  def enact_redirect(conn, result, opts) do
+    case result do
+      {:ok, _} ->
+        conn
+        |> put_flash(:info, Keyword.fetch!(opts, :success_flash))
+        |> redirect(to: Keyword.fetch!(opts, :success_path))
+
+      {:error, %Enact.Error{type: :invalid, changeset: changeset}} ->
+        conn
+        |> assign_errors(changeset)
+        |> redirect(to: Keyword.fetch!(opts, :invalid_path))
+
+      {:error, %Enact.Error{type: :conflict}} ->
+        conn
+        |> put_flash(:error, Keyword.fetch!(opts, :conflict_flash))
+        |> redirect(to: Keyword.get(opts, :conflict_path, Keyword.fetch!(opts, :success_path)))
+
+      {:error, %Enact.Error{type: type} = error}
+      when type in [:forbidden, :not_found, :internal] ->
+        {:error, error}
+    end
+  end
+end
+```
+
+```elixir
+def create(conn, params) do
+  result = Enact.run(CreateProject, params, actor: conn.assigns.current_scope)
+
+  enact_redirect(conn, result,
+    success_flash: "Project created",
+    success_path: ~p"/projects",
+    invalid_path: ~p"/projects/new",
+    conflict_flash: "Project could not be created"
+  )
+end
+```
+
+If the success redirect needs the created record (`~p"/projects/#{project}"`), take it from `{:ok, value}`. Conflict has no new record, so that path cannot be the conflict default.
+
+Import the helper from `use MyAppWeb, :controller` if you want it on every controller. Keep the name prefixed (`enact_redirect/3`) so it does not collide with `Phoenix.Controller.redirect/2`, and import with `only:` so later host helpers do not leak into API controllers.
+
+API controllers should not use this helper. They stay on `with {:ok, record} <- Enact.run(...)`.
+
 ## Rendering errors
 
 One fallback clause handles every action. Because the error taxonomy is closed, this code does not change as actions are added:
@@ -142,7 +198,18 @@ end
 
 Two renderer policies to decide:
 
-- **404/403 collapse.** Rendering `:forbidden` as 404 prevents responses from revealing that a resource exists. Keep the two types distinct internally; collapse only at the renderer.
+- **404/403 collapse.** Rendering `:forbidden` as 404 prevents responses from revealing that a resource exists. Keep the two types distinct internally; collapse only at the renderer. The policy can be format-specific: HTML (and Inertia) often collapse, JSON APIs often keep 403. Put the clause above the catch-all `%Enact.Error{}` head:
+
+  ```elixir
+  def call(conn, {:error, %Enact.Error{type: :forbidden}}) do
+    if get_format(conn) == "html" do
+      call(conn, {:error, :not_found})
+    else
+      call(conn, {:error, :forbidden})
+    end
+  end
+  ```
+
 - **Stable error codes.** Resolver failures carry `validation: :resolution` in the error metadata, so `translate_error/1` can emit machine-readable codes that distinguish reference errors from format errors without string matching.
 
 ## Constraint errors and stale races
