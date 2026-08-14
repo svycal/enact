@@ -75,15 +75,13 @@ defmodule MyAppWeb.ProjectController do
   alias MyApp.Projects.Actions.{CreateProject, UpdateProject}
 
   def create(conn, params) do
-    with {:ok, project} <-
-           CreateProject |> Enact.run(params, actor: conn.assigns.current_scope) do
+    with {:ok, project} <- Enact.run(CreateProject, params, actor: conn.assigns.current_scope) do
       conn |> put_status(:created) |> render(:show, project: project)
     end
   end
 
   def update(conn, params) do
-    with {:ok, project} <-
-           UpdateProject |> Enact.run(params, actor: conn.assigns.current_scope) do
+    with {:ok, project} <- Enact.run(UpdateProject, params, actor: conn.assigns.current_scope) do
       render(conn, :show, project: project)
     end
   end
@@ -127,8 +125,6 @@ defmodule MyAppWeb.Enact do
 end
 ```
 
-Pipe from the action module. Do not start the chain with a function call:
-
 ```elixir
 def create(conn, params) do
   CreateProject
@@ -146,7 +142,7 @@ If the success redirect needs the created record (`~p"/projects/#{project}"`), t
 
 Import the helper from `use MyAppWeb, :controller` if you want it on every controller. Keep the name prefixed (`enact_redirect/3`) so it does not collide with `Phoenix.Controller.redirect/2`, and import with `only:` so later host helpers do not leak into API controllers.
 
-API controllers should not use this helper. They stay on `with {:ok, record} <- CreateProject |> Enact.run(...)`.
+API controllers should not use this helper. They stay on `with {:ok, record} <- Enact.run(CreateProject, ...)`.
 
 ## Rendering errors
 
