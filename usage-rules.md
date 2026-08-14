@@ -6,7 +6,7 @@ Rules for writing application code in a project that uses Enact. Enact standardi
 
 - Every write goes through `Enact.run(ActionModule, params, actor: actor)`. Never write via `Repo.insert/update/delete` from context functions — actions are the only write path.
 - `actor:` is required and `actor: nil` raises. For unauthenticated callers pass an explicit anonymous actor (`:anonymous`, or a scope struct whose `Enact.Actor` impl returns `true`), and only against actions declaring `anonymous?: true` in `config/0`.
-- Pass request metadata (IP, session id) via `assigns: %{}`. **Never** pass pre-loaded domain records through `assigns:` — the subject is fetched by `load/2`, payload references by `resolvers/0`. Actions are self-contained; the extra query is the price.
+- Pass request metadata (IP, session id) via `assigns: %{}`. **Never** pass pre-loaded domain records through `assigns:` — the subject is fetched by `load_subject/2`, payload references by `resolvers/0`. Actions are self-contained; the extra query is the price.
 - The same calling convention applies from controllers, background jobs, tests, and IEx. There is no internal-bypass path.
 - For confirmation flows: `Enact.dry_run/3` returns an `%Enact.Preview{}`; pass `preview.digest` back to `run/3` as `confirm_digest:`. A mismatch returns `:conflict`.
 
@@ -25,7 +25,7 @@ lib/my_app/projects/
 ```
 
 - Input modules are shared per resource (one `ProjectInput` serving both create and patch), so they sit beside the actions that use them.
-- The context module keeps reads and whatever `load/2` delegates to — never writes; writes go through `Enact.run`.
+- The context module keeps reads and whatever `load_subject/2` delegates to — never writes; writes go through `Enact.run`.
 - Resolver fetchers start as private functions in the action that declares them; extract a shared module only at the second duplicated fetcher.
 - Nested item schemas start nested inside their input module; promote to `inputs/<item>_input.ex` in the same context on second use.
 
@@ -40,13 +40,13 @@ defmodule MyApp.Projects.Actions.UpdateProject do
   alias MyApp.Projects.Project
 
   @impl Enact.Action
-  def config, do: [mode: :patch, loads_subject?: true]
+  def config, do: [mode: :patch]
 
   @impl Enact.Action
   def input, do: ProjectInput
 
   @impl Enact.Action
-  def load(%{"id" => id}, ctx), do: Projects.get_project(ctx.actor, id)
+  def load_subject(%{"id" => id}, ctx), do: Projects.get_project(ctx.actor, id)
 
   @impl Enact.Action
   def authorize(ctx), do: MyApp.Policy.can?(ctx.actor, :update, ctx.subject)
@@ -62,13 +62,13 @@ defmodule MyApp.Projects.Actions.UpdateProject do
 end
 ```
 
-- `config/0`, `input/0`, and `resolvers/0` return **pure data**. `load/2`, `authorize/1`, `validate/2`, `execute/2`, `after_commit/2` are **single-purpose functions**. Keep that dichotomy.
-- The URL-anchored record is the **subject** → fetch it in `load/2` (the updated record in patch mode; the parent in create-under-parent). Body-referenced public ids → `resolvers/0`. No other fetching channel.
-- `load/2` and every resolver fetcher **must scope by a trust anchor**: the actor's tenant when authenticated; a public-by-construction subject for `anonymous?: true` actions. Returning `nil` from `load/2` produces `:not_found` — cross-tenant probes must be indistinguishable from nonexistent records.
+- `config/0`, `input/0`, and `resolvers/0` return **pure data**. `load_subject/2`, `authorize/1`, `validate/2`, `execute/2`, `after_commit/2` are **single-purpose functions**. Keep that dichotomy.
+- The URL-anchored record is the **subject** → override `load_subject/2` (the updated record in patch mode; the parent in create-under-parent). The default is a no-op (`:no_subject`); `nil` means `:not_found`. Body-referenced public ids → `resolvers/0`. No other fetching channel.
+- `load_subject/2` and every resolver fetcher **must scope by a trust anchor**: the actor's tenant when authenticated; a public-by-construction subject for `anonymous?: true` actions. Returning `nil` from `load_subject/2` produces `:not_found` — cross-tenant probes must be indistinguishable from nonexistent records.
 - Never invent error atoms. The taxonomy is closed: `:invalid`, `:forbidden`, `:not_found`, `:conflict`, `:internal`. To signal a race from `execute/2`, return `{:error, Enact.Error.conflict(:reason)}`.
 - In `execute/2`: build the write from `Enact.updates(changeset, ctx)` — **never** from bare `apply_changes/1` (it erases omitted-vs-provided). Translate public ids by reading `ctx.assigns` (e.g. `ctx.assigns.owner.id`). The updates map is persistence-ready: embeds arrive as plain maps, so feed it straight to your persistence changeset. Declare DB constraints; the runner promotes constraint-error changesets to `:invalid`.
 - `after_commit/2` is for post-commit side effects only (job insertion, analytics). It runs outside the transaction and can never roll back.
-- Archive/cancel/resend-style actions: `mode: :patch, loads_subject?: true, input: nil` — preconditions go in `authorize/1`, subject checks in `load/2`.
+- Archive/cancel/resend-style actions: `mode: :patch, input: nil` plus an overridden `load_subject/2` — preconditions go in `authorize/1`, subject checks in `load_subject/2`.
 
 ## Input schemas
 

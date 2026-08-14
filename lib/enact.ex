@@ -23,7 +23,7 @@ defmodule Enact do
       channel for request metadata (IP, session id) that isn't part of the
       actor. Resolver-stashed keys are merged after and win on collision.
       Never pass pre-loaded domain records here — record fetching belongs
-      in `load/2` (URL subject) or `resolvers/0` (body references).
+      in `load_subject/2` (URL subject) or `resolvers/0` (body references).
 
   Unknown options raise `ArgumentError` — a misspelled option (an
   `assigns:` typo, or worse, a `confirm_digest:` typo silently skipping
@@ -31,7 +31,7 @@ defmodule Enact do
 
   ## Error normalization
 
-    * `load/2` returning `nil` → `:not_found`
+    * `load_subject/2` returning `nil` → `:not_found`
     * `authorize/1` returning `false` → `:forbidden`
     * post-validate invalid changeset → `:invalid` (one response carries
       all cast + validation errors; there is no cast-stage fast-fail)
@@ -431,16 +431,13 @@ defmodule Enact do
     end
   end
 
-  defp load_subject(action, config, ctx) do
-    if Keyword.get(config, :loads_subject?, false) do
-      case action.load(ctx.params, ctx) do
-        nil -> {:error, Error.not_found()}
-        {:error, %Error{} = error} -> {:error, error}
-        {:error, reason} -> {:error, Error.not_found(reason)}
-        subject -> {:ok, %{ctx | subject: subject}}
-      end
-    else
-      {:ok, ctx}
+  defp load_subject(action, _config, ctx) do
+    case action.load_subject(ctx.params, ctx) do
+      :no_subject -> {:ok, ctx}
+      nil -> {:error, Error.not_found()}
+      {:error, %Error{} = error} -> {:error, error}
+      {:error, reason} -> {:error, Error.not_found(reason)}
+      subject -> {:ok, %{ctx | subject: subject}}
     end
   end
 
@@ -455,9 +452,8 @@ defmodule Enact do
 
   defp base(module, %Context{mode: :patch, subject: nil}) do
     raise ArgumentError, """
-    a patch-mode action with an input schema must load a subject: \
-    #{inspect(module)}.from_subject/1 builds the validation base from it. \
-    Set loads_subject?: true in config/0 and implement load/2.\
+    a patch-mode action with an input schema must implement load_subject/2: \
+    #{inspect(module)}.from_subject/1 builds the validation base from the subject.\
     """
   end
 

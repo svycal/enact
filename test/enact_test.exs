@@ -36,13 +36,10 @@ defmodule EnactTest do
     use Enact.Action
 
     @impl Enact.Action
-    def config, do: [loads_subject?: true]
-
-    @impl Enact.Action
     def input, do: nil
 
     @impl Enact.Action
-    def load(_params, _ctx) do
+    def load_subject(_params, _ctx) do
       send(self(), :load_called)
       %Project{id: 1}
     end
@@ -55,13 +52,13 @@ defmodule EnactTest do
     use Enact.Action
 
     @impl Enact.Action
-    def config, do: [mode: :patch, loads_subject?: true]
+    def config, do: [mode: :patch]
 
     @impl Enact.Action
     def input, do: nil
 
     @impl Enact.Action
-    def load(_params, _ctx), do: Process.get(:enact_subject)
+    def load_subject(_params, _ctx), do: Process.get(:enact_subject)
 
     @impl Enact.Action
     def validate(_changeset, _ctx), do: raise("validate must not run for input: nil")
@@ -258,22 +255,17 @@ defmodule EnactTest do
   ## Load
 
   describe "load" do
-    test "actions without loads_subject? skip load entirely" do
+    test "the default load_subject/2 is a no-op and leaves the action subject-less" do
       assert {:ok, _} = run(CreateProject, @valid_create)
     end
 
-    test "the loaded subject lands in ctx.subject" do
+    test "overriding load_subject/2 is enough to opt into a subject" do
       assert {:ok, %Project{id: 1}} = run(SpiedLoadAction, %{})
       assert_received :load_called
     end
 
-    test "load returning nil produces :not_found" do
-      Process.delete(:enact_subject)
-      assert {:error, %Error{type: :not_found}} = run(UpdateProject, %{"name" => "New"})
-    end
-
-    test "load returning {:error, reason} produces :not_found with the reason" do
-      defmodule ErrorLoadAction do
+    test "a leftover loads_subject? flag without load_subject/2 is ignored" do
+      defmodule LeftoverFlagAction do
         use Enact.Action
 
         @impl Enact.Action
@@ -283,7 +275,26 @@ defmodule EnactTest do
         def input, do: nil
 
         @impl Enact.Action
-        def load(_params, _ctx), do: {:error, :ambiguous_slug}
+        def execute(_changeset, ctx), do: {:ok, ctx.subject}
+      end
+
+      assert {:ok, nil} = run(LeftoverFlagAction, %{})
+    end
+
+    test "load_subject returning nil produces :not_found" do
+      Process.delete(:enact_subject)
+      assert {:error, %Error{type: :not_found}} = run(UpdateProject, %{"name" => "New"})
+    end
+
+    test "load_subject returning {:error, reason} produces :not_found with the reason" do
+      defmodule ErrorLoadAction do
+        use Enact.Action
+
+        @impl Enact.Action
+        def input, do: nil
+
+        @impl Enact.Action
+        def load_subject(_params, _ctx), do: {:error, :ambiguous_slug}
 
         @impl Enact.Action
         def execute(_changeset, _ctx), do: {:ok, :done}

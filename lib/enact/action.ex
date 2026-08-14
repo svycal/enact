@@ -20,8 +20,7 @@ defmodule Enact.Action do
   Static action configuration.
 
   Recognized keys (all optional): `mode: :create | :patch` (default
-  `:create`), `loads_subject?: boolean` (default `false`), `anonymous?:
-  boolean` (default `false`).
+  `:create`), `anonymous?: boolean` (default `false`).
   """
   @callback config() :: keyword()
 
@@ -35,11 +34,13 @@ defmodule Enact.Action do
   @doc """
   Fetches the subject — the URL-anchored record the action operates on or
   within (the updated record in patch mode; the parent in
-  create-under-parent). Only invoked when `loads_subject?: true`; returning
-  `nil` produces `:not_found`. Must scope by the trust anchor (§9 of the
+  create-under-parent). Always invoked. The default is a no-op that
+  returns `:no_subject` (leave `ctx.subject` nil). Returning `nil`
+  produces `:not_found`. Must scope by the trust anchor (§9 of the
   design spec).
   """
-  @callback load(params :: map(), ctx :: Context.t()) :: struct() | nil | {:error, term()}
+  @callback load_subject(params :: map(), ctx :: Context.t()) ::
+              struct() | nil | :no_subject | {:error, term()}
 
   @doc """
   Authorizes the actor against the loaded context. `false` (or an error
@@ -86,7 +87,7 @@ defmodule Enact.Action do
       def config, do: []
 
       @impl Enact.Action
-      def load(_params, _ctx), do: nil
+      def load_subject(_params, _ctx), do: :no_subject
 
       @impl Enact.Action
       def authorize(_ctx), do: true
@@ -101,7 +102,7 @@ defmodule Enact.Action do
       def after_commit(_result, _ctx), do: :ok
 
       defoverridable config: 0,
-                     load: 2,
+                     load_subject: 2,
                      authorize: 1,
                      validate: 2,
                      resolvers: 0,

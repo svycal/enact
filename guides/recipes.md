@@ -121,13 +121,13 @@ defmodule MyApp.Customers.Actions.UpdateCustomer do
   alias MyApp.Customers.Inputs.CustomerInput
 
   @impl Enact.Action
-  def config, do: [mode: :patch, loads_subject?: true]
+  def config, do: [mode: :patch]
 
   @impl Enact.Action
   def input, do: CustomerInput
 
   @impl Enact.Action
-  def load(%{"id" => id}, ctx), do: Customers.get_customer(ctx.actor, id)
+  def load_subject(%{"id" => id}, ctx), do: Customers.get_customer(ctx.actor, id)
 
   @impl Enact.Action
   def execute(changeset, ctx) do

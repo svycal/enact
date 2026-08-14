@@ -58,13 +58,13 @@ defmodule Enact.DryRunTest do
     use Enact.Action
 
     @impl Enact.Action
-    def config, do: [mode: :patch, loads_subject?: true]
+    def config, do: [mode: :patch]
 
     @impl Enact.Action
     def input, do: nil
 
     @impl Enact.Action
-    def load(_params, _ctx), do: Process.get(:enact_subject)
+    def load_subject(_params, _ctx), do: Process.get(:enact_subject)
 
     @impl Enact.Action
     def execute(_changeset, ctx), do: {:ok, ctx.subject}
@@ -74,13 +74,13 @@ defmodule Enact.DryRunTest do
     use Enact.Action
 
     @impl Enact.Action
-    def config, do: [mode: :patch, loads_subject?: true]
+    def config, do: [mode: :patch]
 
     @impl Enact.Action
     def input, do: nil
 
     @impl Enact.Action
-    def load(_params, _ctx), do: Process.get(:enact_subject)
+    def load_subject(_params, _ctx), do: Process.get(:enact_subject)
 
     @impl Enact.Action
     def execute(_changeset, ctx), do: {:ok, ctx.subject}

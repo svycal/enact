@@ -56,9 +56,9 @@ Every callback is either **pure data** or **a single-purpose function over (chan
 
 | Callback         | Required              | Kind     | Purpose                                                                                                                                                                                                   |
 | ---------------- | --------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `config/0`       | no (default `[]`)     | data     | `mode: :create \| :patch` (default `:create`), `loads_subject?: boolean` (default `false`), `anonymous?: boolean` (default `false`, §2.4)                                                                 |
+| `config/0`       | no (default `[]`)     | data     | `mode: :create \| :patch` (default `:create`), `anonymous?: boolean` (default `false`, §2.4)                                                                 |
 | `input/0`        | yes                   | data     | Input-schema module, or `nil` for input-less actions (§4)                                                                                                                                                 |
-| `load/2`         | no (default `nil`)    | function | Fetch the subject — the URL-anchored record the action operates on _or within_ (the updated record in patch mode; the parent in create-under-parent); `(params, ctx) → struct \| nil \| {:error, reason}` |
+| `load_subject/2`         | no (default `:no_subject`) | function | Fetch the subject — the URL-anchored record the action operates on _or within_ (the updated record in patch mode; the parent in create-under-parent). Always invoked. Default is a no-op; `nil` → `:not_found` |
 | `authorize/1`    | no (default `true`)   | function | `(ctx) → boolean \| {:error, reason}`                                                                                                                                                                     |
 | `validate/2`     | no (default identity) | function | Ordinary changeset pipeline; `(changeset, ctx) → changeset`. Not invoked for `input: nil` actions                                                                                                         |
 | `resolvers/0`    | no (default `[]`)     | data     | Reference-resolution spec (§7)                                                                                                                                                                            |
@@ -89,17 +89,17 @@ Every callback is either **pure data** or **a single-purpose function over (chan
 
 Some actions must accept unauthenticated callers (e.g. a public visitor creating a booking through a public link). Design:
 
-- **Anonymity is a declared property of the action**: `config/0` returns `anonymous?: true`. The security-review question "which write paths accept unauthenticated callers?" is answered by grepping for it — a closed, auditable list, parallel to `loads_subject?`. An authenticated actor may still call an anonymous-capable action (`anonymous?` is a floor, not a partition).
+- **Anonymity is a declared property of the action**: `config/0` returns `anonymous?: true`. The security-review question "which write paths accept unauthenticated callers?" is answered by grepping for it — a closed, auditable list. An authenticated actor may still call an anonymous-capable action (`anonymous?` is a floor, not a partition).
 - **The `Enact.Actor` protocol** answers `anonymous?/1` for any actor term: `@fallback_to_any` returns `false`; a built-in impl makes the bare `:anonymous` atom anonymous (zero-ceremony option for simple apps); host apps add a small impl for their scope struct (`%Scope{user: nil} → true`), enabling rich anonymous scopes carrying session id / IP for rate limiting — the idiomatic Phoenix 1.8 shape.
 - **Runner enforcement**: `actor: nil` raises (always, §2.1). `Enact.Actor.anonymous?(actor)` true → permitted only when the action declares `anonymous?: true`, otherwise `{:error, %Enact.Error{type: :forbidden}}` before any pipeline work. Applies identically to `dry_run/3`.
-- **Tenancy anchoring without an actor**: convention #1 (§9) generalizes — every load and fetcher scopes by a _trust anchor_: the actor when authenticated, a public-by-construction subject when anonymous (e.g. `load/2` fetches the resource by public slug + visibility flag, and all fetchers scope through `ctx.subject`'s tenant, not the actor). Anonymous endpoints are the prime ID-enumeration surface; §7's "not found ≡ not yours" property does real work here.
+- **Tenancy anchoring without an actor**: convention #1 (§9) generalizes — every load and fetcher scopes by a _trust anchor_: the actor when authenticated, a public-by-construction subject when anonymous (e.g. `load_subject/2` fetches the resource by public slug + visibility flag, and all fetchers scope through `ctx.subject`'s tenant, not the actor). Anonymous endpoints are the prime ID-enumeration surface; §7's "not found ≡ not yours" property does real work here.
 - **Audit/telemetry**: events record the anonymous actor affirmatively ("an unauthenticated party did X"), never a null field.
 
 ## 3. Pipeline
 
 **Full pipeline:** `load → cast → authorize → validate → resolve → execute → after_commit`
 
-The `load` step runs first whenever `loads_subject?: true`, in either mode (rationale in invariant 3); actions without a subject skip it.
+The load step always runs first, in either mode (rationale in invariant 3). The default `load_subject/2` returns `:no_subject` and leaves `ctx.subject` nil; override it to fetch a subject.
 
 Ordering invariants (structural, not conventional):
 
@@ -111,13 +111,14 @@ Ordering invariants (structural, not conventional):
 Runner error normalization:
 
 - No cast-stage fast-fail: `changeset/3` output (cast, required-ness, base validations) flows into `validate/2`, and one `:invalid` is produced after the validate step, in both modes — the caller gets all input errors in a single response. (The runner cannot distinguish cast errors from module validations anyway; `check/2` gates the expensive checks.)
-- `load/2` returning nil (when `loads_subject?: true`) → `:not_found`.
+- `load_subject/2` returning `:no_subject` (the default) → no subject.
+- `load_subject/2` returning nil → `:not_found`.
 - `authorize/1` false → `:forbidden`.
 - Post-validate `changeset.valid? == false` → `:invalid` carrying the changeset.
 - A `%Ecto.Changeset{}` error from `repo.insert/update` (declared constraints) → promoted to `:invalid`, not `:internal`.
 - Any other execute failure → `:internal` (see §8 discipline).
 
-**Where record-fetching lives:** URL-anchored records → `load/2` (the subject); body-referenced records → `resolvers/0` (§7). Do **not** pass pre-loaded domain records via the `assigns:` passthrough: an externally-loaded record escapes trust-anchor enforcement, breaks `run`/`dry_run` parity for callers with no controller (jobs, MCP), and makes provenance unauditable. Actions are self-contained — the extra query is the price, and it's cheap.
+**Where record-fetching lives:** URL-anchored records → `load_subject/2` (the subject); body-referenced records → `resolvers/0` (§7). Do **not** pass pre-loaded domain records via the `assigns:` passthrough: an externally-loaded record escapes trust-anchor enforcement, breaks `run`/`dry_run` parity for callers with no controller (jobs, MCP), and makes provenance unauditable. Actions are self-contained — the extra query is the price, and it's cheap.
 
 ## 4. Input schemas
 
@@ -128,7 +129,7 @@ There is exactly one input shape — do not add others during implementation. Re
 - **Flat schemaless types maps** (`%{name: {:string, required: true}}`): the `{type, required: true}` tuple is an Enact-invented schema vocabulary; modules-only keeps "input schemas are just Ecto" literally true. A dual shape forces a second code path through every subtle part of the runner (cast, base construction, `updates/2` key selection, guardrails, reconciliation) — precisely where the PATCH edge cases live — and requires a special runner-applied `validate_required` rule, whereas with modules required-ness lives in the changeset heads like everything else. The saving is ~8 lines per action, amortized away by shared input modules.
 - **Inline nested-map recursion in the runner** (nested schemas as literal maps, cast recursively): forces manual `valid?` propagation and `changes`-internals knowledge into application code; `cast_embed` on embedded-schema modules does both natively.
 
-**`input/0 → nil`** (archive, cancel, resend — subject in the URL, empty body): the runner skips cast **and** validate, passing an empty changeset through the pipeline; an input-less action's preconditions belong in `authorize/1` and its subject checks in `load/2`. `updates/2` returns `%{}`. Typical config for archive/cancel-style actions: `mode: :patch, loads_subject?: true, input: nil`.
+**`input/0 → nil`** (archive, cancel, resend — subject in the URL, empty body): the runner skips cast **and** validate, passing an empty changeset through the pipeline; an input-less action's preconditions belong in `authorize/1` and its subject checks in `load_subject/2`. `updates/2` returns `%{}`. Typical config for archive/cancel-style actions: `mode: :patch` with `input: nil` and an overridden `load_subject/2`.
 
 ### 4.1 Input module contract — `Enact.InputSchema`
 
@@ -400,7 +401,7 @@ defstruct [:type, :changeset, :reason, meta: %{}]
 - **Closed taxonomy, HTTP-shaped:** invalid→422, forbidden→403, not_found→404, conflict→409, internal→500. No bespoke error atoms from actions — the renderer must never grow a default clause.
 - **`reason` is internal only** (logs/telemetry), never serialized. The only outward-rich type is `:invalid` via the changeset (safe: describes the caller's own input). Rendering = one `ErrorRenderer` using `traverse_errors/2`; handles nested/indexed embed errors with zero per-action knowledge; it is the API-versioning seam.
 - **`:conflict`** for optimistic/temporal races (resource claimed between validation and insert, stale_error_field). Input was fine; the world changed.
-- **404/403 collapse** is renderer policy (defense in depth; tenant-scoped `load/2` mostly produces `:not_found` for cross-tenant probes anyway). Internally keep both types — different bugs.
+- **404/403 collapse** is renderer policy (defense in depth; tenant-scoped `load_subject/2` mostly produces `:not_found` for cross-tenant probes anyway). Internally keep both types — different bugs.
 - **`:internal` is a bug bucket.** Every production occurrence is either a bug or a missing promotion to a real type. Runner auto-promotes constraint-error changesets from repo failures to `:invalid`.
 - **Telemetry:** the runner emits `[:enact, :action, :run]` / `[:enact, :action, :run, :error]` — per-action, per-type metrics for observability tooling and audit trails ("actor X attempted Y, denied :forbidden") with zero action-author involvement. The run event fires after a successful commit but before `after_commit/2`, so a raising side effect cannot suppress the audit record of a committed write. Dry runs emit distinct events (`[:enact, :action, :dry_run]` and `[:enact, :action, :dry_run, :error]`) so attempt-counting and audit trails never conflate previews with real executions — a dry run is still an authorization-relevant event and should be auditable as one.
 - `meta` for machine-readable extras (retry_after, stable error codes) only.
@@ -420,7 +421,7 @@ Invocation: memoized first-`run` check, **plus** a CI test that calls it on ever
 
 **Residual conventions** (not mechanically checkable; mitigate with the §10 cross-tenant test + greppable single locations):
 
-1. `load/2` and every fetcher must scope by a trust anchor — the actor/tenant when authenticated; a public-by-construction subject for `anonymous?: true` actions (§2.4).
+1. `load_subject/2` and every fetcher must scope by a trust anchor — the actor/tenant when authenticated; a public-by-construction subject for `anonymous?: true` actions (§2.4).
 2. Fetchers check the trust anchor first and emit precise error messages only about records the anchor-scoped query returned (§7).
 3. Writes go through `Enact.run` — no direct-Repo context functions (social + optional Credo rule).
 4. Optional scalar columns are nullable with no default — `NULL` is the single representation of empty, aligning storage, `ctx.subject`, JSON `null`, and stock cast coalescing (the sibling of §4.3's "defaults live in the DB"). `NOT NULL DEFAULT ''` columns force `""` into the input domain and require per-field `""`-preserving casts; reserve them for fields where empty-string is genuinely distinct from absent.
