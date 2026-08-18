@@ -1,6 +1,6 @@
 # Phoenix Integration
 
-Enact has no Phoenix dependency. A host application wires three integration points itself: the actor, the controller calling convention, and the error renderer. This guide provides reference implementations for each.
+Enact has no Phoenix dependency. A host application wires four integration points itself: the actor, the context calling convention, the controller, and the error renderer. This guide provides reference implementations for each.
 
 ## Setup
 
@@ -12,12 +12,36 @@ Enact has no Phoenix dependency. A host application wires three integration poin
 config :enact, repo: MyApp.Repo
 ```
 
+## Contexts
+
+Phoenix contexts remain the application API. Controllers, LiveViews, and jobs call context functions; those functions are one-liners that forward to `Enact.run/3` (or `dry_run/3`). The action module is the write; the context is the name the rest of the app uses.
+
+```elixir
+# lib/my_app/projects.ex
+defmodule MyApp.Projects do
+  alias MyApp.Projects.Actions.{ArchiveProject, CreateProject, UpdateProject}
+
+  def create_project(params, opts), do: Enact.run(CreateProject, params, opts)
+  def update_project(params, opts), do: Enact.run(UpdateProject, params, opts)
+  def archive_project(params, opts), do: Enact.run(ArchiveProject, params, opts)
+
+  def create_project_dry_run(params, opts), do: Enact.dry_run(CreateProject, params, opts)
+  def update_project_dry_run(params, opts), do: Enact.dry_run(UpdateProject, params, opts)
+
+  # reads and load_subject fetchers stay here
+end
+```
+
+Keep those bodies as a single `Enact.run` / `Enact.dry_run` call. Do not reshape params, stamp persistable fields, or preload records into `assigns:` — that work belongs in the action (`execute/2`, `load_subject/2`, `resolvers/0`). `opts` pass through unchanged so `:actor`, `:repo`, `:assigns`, and `:confirm_digest` work as they do on `Enact.run/3`.
+
+Action tests and IEx may still call `Enact.run/3` directly. That is the implementation API, not a second door for controllers.
+
 ## The actor: your scope struct
 
 In Phoenix 1.8+, the recommended actor is the scope struct. Enact never reads the actor itself; only your `authorize/1` callbacks and fetchers do.
 
 ```elixir
-Enact.run(CreateProject, params, actor: conn.assigns.current_scope)
+Projects.create_project(params, actor: conn.assigns.current_scope)
 ```
 
 Implement the `Enact.Actor` protocol for your scope struct so Enact can identify anonymous scopes:
@@ -49,7 +73,7 @@ Only actions that declare `anonymous?: true` in `config/0` accept an anonymous a
 The scope pattern is not required. The actor is opaque to Enact, so any term works. In an application that assigns `current_user`, pass it directly:
 
 ```elixir
-Enact.run(CreateProject, params, actor: conn.assigns.current_user)
+Projects.create_project(params, actor: conn.assigns.current_user)
 ```
 
 Authenticated actors need no `Enact.Actor` implementation; the fallback returns `false` for any term. Your `authorize/1` callbacks and fetchers read `ctx.actor` as a user struct instead of a scope.
@@ -57,7 +81,7 @@ Authenticated actors need no `Enact.Actor` implementation; the fallback returns 
 The rule for public endpoints is unchanged: never pass `nil`. The `:anonymous` atom is a built-in anonymous actor:
 
 ```elixir
-Enact.run(CreateBooking, params, actor: :anonymous)
+Bookings.create_booking(params, actor: :anonymous)
 ```
 
 Unlike an anonymous scope, `:anonymous` carries no session ID or IP. If your `anonymous?: true` actions need those for rate limiting or auditing, use a scope-shaped actor instead.
@@ -72,16 +96,16 @@ defmodule MyAppWeb.ProjectController do
 
   action_fallback MyAppWeb.FallbackController
 
-  alias MyApp.Projects.Actions.{CreateProject, UpdateProject}
+  alias MyApp.Projects
 
   def create(conn, params) do
-    with {:ok, project} <- Enact.run(CreateProject, params, actor: conn.assigns.current_scope) do
+    with {:ok, project} <- Projects.create_project(params, actor: conn.assigns.current_scope) do
       conn |> put_status(:created) |> render(:show, project: project)
     end
   end
 
   def update(conn, params) do
-    with {:ok, project} <- Enact.run(UpdateProject, params, actor: conn.assigns.current_scope) do
+    with {:ok, project} <- Projects.update_project(params, actor: conn.assigns.current_scope) do
       render(conn, :show, project: project)
     end
   end
@@ -90,7 +114,7 @@ end
 
 ## Inertia / HTML form posts
 
-JSON controllers can `with` on `Enact.run/3` because success is a render and every error is a status. Inertia form posts are different: success, `:invalid`, and `:conflict` are Phoenix `redirect/2` (Inertia intercepts those). `:invalid` in particular is not a 422 page — `assign_errors/2` (from [inertia-phoenix](https://github.com/inertiajs/inertia-phoenix)) stashes the changeset and the next GET paints the form. That is the Inertia contract, not Enact's.
+JSON controllers can `with` on the context function because success is a render and every error is a status. Inertia form posts are different: success, `:invalid`, and `:conflict` are Phoenix `redirect/2` (Inertia intercepts those). `:invalid` in particular is not a 422 page — `assign_errors/2` (from [inertia-phoenix](https://github.com/inertiajs/inertia-phoenix)) stashes the changeset and the next GET paints the form. That is the Inertia contract, not Enact's.
 
 `:forbidden`, `:not_found`, and `:internal` still belong to `action_fallback`. Return the error tuple; do not call the fallback module from the helper. `action_fallback` only runs when the action returns something other than a `%Plug.Conn{}`.
 
@@ -127,8 +151,8 @@ end
 
 ```elixir
 def create(conn, params) do
-  CreateProject
-  |> Enact.run(params, actor: conn.assigns.current_scope)
+  params
+  |> Projects.create_project(actor: conn.assigns.current_scope)
   |> enact_redirect(conn,
     success_flash: "Project created",
     success_path: ~p"/projects",
@@ -142,7 +166,7 @@ If the success redirect needs the created record (`~p"/projects/#{project}"`), t
 
 Import the helper from `use MyAppWeb, :controller` if you want it on every controller. Keep the name prefixed (`enact_redirect/3`) so it does not collide with `Phoenix.Controller.redirect/2`, and import with `only:` so later host helpers do not leak into API controllers.
 
-API controllers should not use this helper. They stay on `with {:ok, record} <- Enact.run(CreateProject, ...)`.
+API controllers should not use this helper. They stay on `with {:ok, record} <- Projects.create_project(...)`.
 
 ## Rendering errors
 
@@ -272,17 +296,19 @@ Every `:internal` occurrence in production logs is a defect to fix. It is never 
 
 ## Background jobs
 
-Background jobs use the same calling convention. Reconstruct the actor from stored identity; do not bypass the action layer:
+Background jobs use the same calling convention. Reconstruct the actor from stored identity; do not bypass the context (or the action behind it):
 
 ```elixir
 defmodule MyApp.Workers.ArchiveStaleProject do
   use Oban.Worker
 
+  alias MyApp.Projects
+
   @impl Oban.Worker
   def perform(%{args: %{"project_id" => id, "actor_user_id" => user_id}}) do
     actor = MyApp.Accounts.scope_for_user_id!(user_id)
 
-    case Enact.run(MyApp.Projects.Actions.ArchiveProject, %{"id" => id}, actor: actor) do
+    case Projects.archive_project(%{"id" => id}, actor: actor) do
       {:ok, _} -> :ok
       # already archived or deleted: don't retry
       {:error, %Enact.Error{type: :not_found}} -> :ok
@@ -315,9 +341,10 @@ Error events carry `type:` in metadata, so a handler can record entries such as 
 ## Confirmation flows (agent surfaces, MCP tools)
 
 ```elixir
-{:ok, preview} = Enact.dry_run(UpdateProject, params, actor: actor)
+{:ok, preview} = Projects.update_project_dry_run(params, actor: actor)
 # present preview.updates for confirmation, then:
-{:ok, project} = Enact.run(UpdateProject, params, actor: actor, confirm_digest: preview.digest)
+{:ok, project} =
+  Projects.update_project(params, actor: actor, confirm_digest: preview.digest)
 ```
 
 The digest binds the action, mode, and updates map; any difference between the previewed change and the confirming run returns `:conflict`. The preview lists resolver names only. If the confirmation UI needs display information (for example, the resolved user's name), render it host-side from your own reads.

@@ -4,13 +4,13 @@ Rules for writing application code in a project that uses Enact. Enact standardi
 
 ## Calling actions
 
-- Every write goes through `Enact.run(ActionModule, params, actor: actor)`. Never write via `Repo.insert/update/delete` from context functions — actions are the only write path.
+- Every write goes through an action via `Enact.run/3`. Never write via `Repo.insert/update/delete`. Application callers (controllers, LiveViews, jobs) typically go through a context one-liner that only forwards to `Enact.run/3` / `dry_run/3` — see the Phoenix guide. Action tests and IEx may call `Enact.run/3` directly.
 - Callers may pass atom- or string-keyed maps. The runner stringifies keys before any callback runs, so `load_subject/2` and `ctx.params` always see strings. Match `%{"id" => id}`, never `params[:id]`. Values are not rewritten.
 - Params are the invocation payload, not "what a human typed." Jobs and `:system` are callers. A value this run is *saying* — something that will be persisted and previewed — belongs in params on an action whose `authorize/1` allows that caller.
 - `actor:` is required and `actor: nil` raises. For unauthenticated callers pass an explicit anonymous actor (`:anonymous`, or a scope struct whose `Enact.Actor` impl returns `true`), and only against actions declaring `anonymous?: true` in `config/0`.
 - Pass request metadata (IP, session id) via `assigns: %{}`. **Never** pass pre-loaded domain records or persistable fields through `assigns:` — records are fetched by `load_subject/2` / `resolvers/0`; persistable fields smuggled here skip cast, `updates/2`, preview, and the digest. Actions are self-contained; the extra query is the price.
 - The same calling convention applies from controllers, background jobs, tests, and IEx. There is no internal-bypass path.
-- For confirmation flows: `Enact.dry_run/3` returns an `%Enact.Preview{}`; pass `preview.digest` back to `run/3` as `confirm_digest:`. A mismatch returns `:conflict`.
+- For confirmation flows: the context's `*_dry_run` one-liner (or `Enact.dry_run/3`) returns an `%Enact.Preview{}`; pass `preview.digest` back as `confirm_digest:`. A mismatch returns `:conflict`.
 
 ## Organizing modules
 
@@ -18,7 +18,7 @@ Group actions and inputs by context, in `actions/` and `inputs/` subdirectories,
 
 ```
 lib/my_app/projects/
-  projects.ex                 # context: reads + fetch helpers (no writes)
+  projects.ex                 # context: reads, fetch helpers, write one-liners
   project.ex                  # persistence schema
   inputs/project_input.ex     # MyApp.Projects.Inputs.ProjectInput
   actions/create_project.ex   # MyApp.Projects.Actions.CreateProject
@@ -27,7 +27,7 @@ lib/my_app/projects/
 ```
 
 - Input modules are shared per resource (one `ProjectInput` serving both create and patch), so they sit beside the actions that use them.
-- The context module keeps reads and whatever `load_subject/2` delegates to — never writes; writes go through `Enact.run`.
+- The context module keeps reads, whatever `load_subject/2` delegates to, and one-liner write delegates (`def create_project(params, opts), do: Enact.run(CreateProject, params, opts)`). Those bodies only forward — no param reshaping, no persistable fields stamped in. The action is the write.
 - Resolver fetchers start as private functions in the action that declares them; extract a shared module only at the second duplicated fetcher.
 - Nested item schemas start nested inside their input module; promote to `inputs/<item>_input.ex` in the same context on second use.
 

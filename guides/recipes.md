@@ -222,11 +222,10 @@ A two-phase confirmation flow for an agent-facing tool. `preview.updates` is pla
 ```elixir
 defmodule MyAppWeb.MCP.UpdateProjectTool do
   alias MyApp.Projects
-  alias MyApp.Projects.Actions.UpdateProject
 
   # Phase 1: no confirmation token → validate fully, reflect back, change nothing
   def call(params, scope) do
-    case Enact.dry_run(UpdateProject, params, actor: scope) do
+    case Projects.update_project_dry_run(params, actor: scope) do
       {:ok, preview} ->
         # old → new diff: the host owns reads, so fetch current values directly
         current =
@@ -251,7 +250,7 @@ defmodule MyAppWeb.MCP.UpdateProjectTool do
 
   # Phase 2: same params + the digest → execute
   def call(params, scope, confirm_digest) do
-    case Enact.run(UpdateProject, params, actor: scope, confirm_digest: confirm_digest) do
+    case Projects.update_project(params, actor: scope, confirm_digest: confirm_digest) do
       {:ok, project} ->
         %{status: "done", project: Projects.serialize(project)}
 

@@ -75,10 +75,10 @@ defmodule MyApp.Projects.Actions.CreateProject do
 end
 ```
 
-Called identically from controllers, background jobs, tests, and IEx:
+Application callers go through a context one-liner that forwards to `Enact.run/3` (see the Phoenix guide). Action tests and IEx may call the runner directly:
 
 ```elixir
-case Enact.run(CreateProject, params, actor: conn.assigns.current_scope) do
+case Projects.create_project(params, actor: conn.assigns.current_scope) do
   {:ok, project} -> ...
   {:error, %Enact.Error{type: :invalid, changeset: changeset}} -> ...
 end
@@ -148,9 +148,10 @@ Every failure is an `%Enact.Error{}` with one of five HTTP-shaped types: `:inval
 `Enact.dry_run/3` runs everything up to (not including) execute and returns an `%Enact.Preview{}` — the exact updates map a real run would persist, plus a digest for confirmation flows:
 
 ```elixir
-{:ok, preview} = Enact.dry_run(UpdateProject, params, actor: actor)
+{:ok, preview} = Projects.update_project_dry_run(params, actor: actor)
 # show preview.updates to the user...
-{:ok, project} = Enact.run(UpdateProject, params, actor: actor, confirm_digest: preview.digest)
+{:ok, project} =
+  Projects.update_project(params, actor: actor, confirm_digest: preview.digest)
 ```
 
 A digest mismatch returns `:conflict` — "the user confirmed this exact change" is a mechanical guarantee.

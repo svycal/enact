@@ -14,6 +14,8 @@ Initial release.
   callbacks are declared via `@optional_callbacks`
 - Usage rules: params are the invocation payload; persistable fields are
   not passed via `assigns:`
+- Phoenix guide: application callers use context one-liners that forward
+  to `Enact.run/3` / `dry_run/3`
 - Presence-based change detection: `Enact.provided?/2` and `Enact.updates/2`
 - `Enact.Resolve` — scalar and batch reference resolution with
   enumeration-resistant error rendering
