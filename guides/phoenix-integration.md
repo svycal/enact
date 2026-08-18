@@ -64,7 +64,7 @@ Unlike an anonymous scope, `:anonymous` carries no session ID or IP. If your `an
 
 ## Controllers
 
-Phoenix merges path params into `params`, so the subject ID (read by `load_subject/2`) and the request body arrive together. Pass `params` through unchanged:
+Phoenix merges path params into `params`, so the subject ID (read by `load_subject/2`) and the request body arrive together. Pass `params` through unchanged. Jobs and tests may pass atom keys — the runner stringifies them, so actions always see the same string-keyed shape:
 
 ```elixir
 defmodule MyAppWeb.ProjectController do

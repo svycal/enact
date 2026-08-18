@@ -49,6 +49,10 @@ defmodule Enact.Test do
   Options (all optional): `:actor` (default `:test_actor`), `:subject`,
   `:params` (default `%{}`), `:repo`, `:mode` (default `:create`),
   `:assigns` (default `%{}`).
+
+  `:params` are stored as given — this helper does not stringify keys.
+  `Enact.run/3` / `dry_run/3` do. Pass string keys here if the code
+  under test pattern-matches on them.
   """
   @spec build_ctx(keyword()) :: Enact.Context.t()
   def build_ctx(opts \\ []) do

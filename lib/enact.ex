@@ -68,6 +68,12 @@ defmodule Enact do
   post-validation and returns `:conflict` on mismatch, making "the user
   confirmed this exact change" a mechanical guarantee across the
   confirmation gap. Non-confirmation callers never pass it.
+
+  Params may be atom- or string-keyed at the call site. The runner
+  stringifies keys (recursively, through plain maps and lists) before
+  any callback runs, so `load_subject/2` and `ctx.params` always see
+  the Plug/JSON shape. Values are not rewritten. Both `:id` and `"id"`
+  at the same level raises.
   """
   @spec run(module(), map(), keyword()) :: {:ok, term()} | {:error, Error.t()}
   def run(action, params, opts) when is_atom(action) and is_map(params) and is_list(opts) do
@@ -101,6 +107,8 @@ defmodule Enact do
   and its digest feeds `run/3`'s `:confirm_digest` option. Authorization
   runs (don't preview what you can't do), and distinct telemetry events
   are emitted so audit trails never conflate previews with executions.
+
+  Params keys are stringified exactly as in `run/3`.
   """
   @spec dry_run(module(), map(), keyword()) :: {:ok, Preview.t()} | {:error, Error.t()}
   def dry_run(action, params, opts) when is_atom(action) and is_map(params) and is_list(opts) do
@@ -350,7 +358,7 @@ defmodule Enact do
     ctx = %Context{
       actor: actor,
       subject: nil,
-      params: params,
+      params: stringify_keys!(params),
       repo: fetch_repo!(opts),
       mode: mode,
       assigns: Keyword.get(opts, :assigns, %{})
@@ -408,6 +416,47 @@ defmodule Enact do
     Keyword.get(opts, :repo) || Application.get_env(:enact, :repo) ||
       raise ArgumentError,
             "no repo configured — pass repo: MyApp.Repo or set `config :enact, repo: MyApp.Repo`"
+  end
+
+  # Atom keys are accepted at the call site (tests, jobs) and stringified
+  # so actions always see the Plug/JSON shape. Values are untouched;
+  # structs are values (not walked); both :id and "id" at one level raises.
+  defp stringify_keys!(map) when is_map(map) and not is_struct(map) do
+    stringify_value(map)
+  end
+
+  defp stringify_keys!(other) do
+    raise ArgumentError, """
+    params must be a plain map (not a struct); got: #{inspect(other)}
+    """
+  end
+
+  defp stringify_value(map) when is_map(map) and not is_struct(map) do
+    Enum.reduce(map, %{}, &put_stringified_key/2)
+  end
+
+  defp stringify_value(list) when is_list(list), do: Enum.map(list, &stringify_value/1)
+  defp stringify_value(other), do: other
+
+  defp put_stringified_key({key, value}, acc) do
+    string_key = cast_param_key!(key)
+
+    if Map.has_key?(acc, string_key) do
+      raise ArgumentError, """
+      params carry both #{inspect(String.to_existing_atom(string_key))} and \
+      #{inspect(string_key)} — keys are stringified at the run/dry_run \
+      boundary, so the pair is ambiguous. Pass one or the other.
+      """
+    end
+
+    Map.put(acc, string_key, stringify_value(value))
+  end
+
+  defp cast_param_key!(key) when is_binary(key), do: key
+  defp cast_param_key!(key) when is_atom(key), do: Atom.to_string(key)
+
+  defp cast_param_key!(key) do
+    raise ArgumentError, "params keys must be atoms or strings, got: #{inspect(key)}"
   end
 
   defp ensure_authorize!(action) do

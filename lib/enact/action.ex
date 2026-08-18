@@ -40,7 +40,9 @@ defmodule Enact.Action do
   create-under-parent). Always invoked. The default is a no-op that
   returns `:no_subject` (leave `ctx.subject` nil). Returning `nil`
   produces `:not_found`. Must scope by the trust anchor (§9 of the
-  design spec).
+  design spec). Params are string-keyed — the runner stringifies atom
+  keys at the `run`/`dry_run` boundary — and values are uncast. Match
+  `%{"id" => id}`, not `params[:id]`.
   """
   @callback load_subject(params :: map(), ctx :: Context.t()) ::
               struct() | nil | :no_subject | {:error, term()}

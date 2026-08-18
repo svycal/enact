@@ -49,6 +49,7 @@ Enact.dry_run(ActionModule, params, actor: actor)
 - `run/3` and `dry_run/3` accept an optional `assigns: %{}` passthrough merged into `ctx.assigns` — the documented channel for request metadata (IP, session id) that isn't part of the actor. Resolver-stashed keys are merged after and win on collision.
 - Callers never choose the mode; mode is the action's identity via `config/0`.
 - Same calling convention from controllers, background jobs, tests, IEx. No internal-bypass path.
+- **Params keys are stringified at the `run`/`dry_run` boundary** (Oban-shaped: atoms at the call site, Plug/JSON strings inside). Values are untouched. Nested plain maps and lists of maps are walked; structs are values and are not walked. Both `:id` and `"id"` at the same level raises — the pair is ambiguous. Inside `load_subject/2` and `ctx.params`, match `%{"id" => id}`, never `params[:id]`.
 
 ### 2.2 The behaviour
 
@@ -75,7 +76,7 @@ Every callback is either **pure data** or **a single-purpose function over (chan
   actor: term(),
   # filled by load step: updated record (patch) or parent anchor (create)
   subject: struct() | nil,
-  # raw params — kept for presence checks & audit
+  # caller params after key stringification (values still raw)
   params: map(),
   repo: module(),
   # from action config

@@ -194,6 +194,93 @@ defmodule EnactTest do
     end
   end
 
+  ## Params keys
+
+  describe "params key stringification" do
+    defmodule ParamsProbe do
+      use Enact.Action
+
+      @impl Enact.Action
+      def input, do: nil
+
+      @impl Enact.Action
+      def authorize(_ctx), do: true
+
+      @impl Enact.Action
+      def load_subject(%{"id" => id}, _ctx), do: %{id: id}
+      def load_subject(_params, _ctx), do: :no_subject
+
+      @impl Enact.Action
+      def execute(_changeset, ctx), do: {:ok, ctx.params}
+    end
+
+    test "atom keys at the call site are stringified inside the action" do
+      assert {:ok, params} = run(ParamsProbe, %{id: "abc", name: "Ada", status: :active})
+
+      assert params == %{"id" => "abc", "name" => "Ada", "status" => :active}
+    end
+
+    test "string keys pass through" do
+      assert {:ok, %{"id" => "abc"}} = run(ParamsProbe, %{"id" => "abc"})
+    end
+
+    test "load_subject can match string keys when the caller passed atoms" do
+      assert {:ok, %{"id" => "abc"}} = run(ParamsProbe, %{id: "abc"})
+    end
+
+    test "nested plain maps and lists of maps are walked; structs and atom values are not" do
+      when_date = ~D[2020-01-01]
+      extra = %Project{id: 7}
+
+      assert {:ok, params} =
+               run(ParamsProbe, %{
+                 id: "abc",
+                 when: when_date,
+                 extra: extra,
+                 address: %{city: "X"},
+                 items: [%{qty: 1}, %{"sku" => "a"}]
+               })
+
+      assert params["when"] == when_date
+      assert params["extra"] == extra
+      assert params["address"] == %{"city" => "X"}
+      assert params["items"] == [%{"qty" => 1}, %{"sku" => "a"}]
+    end
+
+    test "atom-keyed input casts the same as string-keyed input" do
+      assert {:ok, %{name: "Alpha", slug: "alpha"}} =
+               run(CreateProject, %{name: "Alpha", slug: "alpha"})
+    end
+
+    test "both atom and string forms of the same key raise" do
+      assert_raise ArgumentError, ~r/both :id and "id"/, fn ->
+        run(ParamsProbe, %{"id" => 2, id: 1})
+      end
+    end
+
+    test "a nested atom/string collision raises" do
+      assert_raise ArgumentError, ~r/both :qty and "qty"/, fn ->
+        run(ParamsProbe, %{items: [%{"qty" => 2, qty: 1}]})
+      end
+    end
+
+    test "non-atom, non-string keys raise" do
+      assert_raise ArgumentError, ~r/atoms or strings/, fn ->
+        run(ParamsProbe, %{1 => "x"})
+      end
+    end
+
+    test "dry_run stringifies keys the same way" do
+      assert {:ok, preview} =
+               Enact.dry_run(CreateProject, %{name: "Alpha", slug: "alpha"},
+                 actor: :user,
+                 repo: FakeRepo
+               )
+
+      assert preview.updates == %{name: "Alpha", slug: "alpha"}
+    end
+  end
+
   ## Option validation
 
   describe "option validation" do

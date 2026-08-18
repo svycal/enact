@@ -6,7 +6,9 @@ Initial release.
 
 - `Enact.run/3` and `Enact.dry_run/3` — the `load → cast → authorize →
   validate → resolve → execute → after_commit` pipeline with actor
-  enforcement, the closed error taxonomy, and telemetry events
+  enforcement, the closed error taxonomy, and telemetry events.
+  Atom-keyed params are stringified at the boundary (values untouched;
+  atom+string collision at the same level raises)
 - `Enact.Action` and `Enact.InputSchema` behaviours; `Enact.Actor` protocol.
   `authorize/1` is required (an open write is a written `true`); optional
   callbacks are declared via `@optional_callbacks`

@@ -5,6 +5,7 @@ Rules for writing application code in a project that uses Enact. Enact standardi
 ## Calling actions
 
 - Every write goes through `Enact.run(ActionModule, params, actor: actor)`. Never write via `Repo.insert/update/delete` from context functions — actions are the only write path.
+- Callers may pass atom- or string-keyed maps. The runner stringifies keys before any callback runs, so `load_subject/2` and `ctx.params` always see strings. Match `%{"id" => id}`, never `params[:id]`. Values are not rewritten.
 - `actor:` is required and `actor: nil` raises. For unauthenticated callers pass an explicit anonymous actor (`:anonymous`, or a scope struct whose `Enact.Actor` impl returns `true`), and only against actions declaring `anonymous?: true` in `config/0`.
 - Pass request metadata (IP, session id) via `assigns: %{}`. **Never** pass pre-loaded domain records through `assigns:` — the subject is fetched by `load_subject/2`, payload references by `resolvers/0`. Actions are self-contained; the extra query is the price.
 - The same calling convention applies from controllers, background jobs, tests, and IEx. There is no internal-bypass path.
