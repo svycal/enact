@@ -59,13 +59,13 @@ Every callback is either **pure data** or **a single-purpose function over (chan
 | `config/0`       | no (default `[]`)     | data     | `mode: :create \| :patch` (default `:create`), `anonymous?: boolean` (default `false`, §2.4)                                                                 |
 | `input/0`        | yes                   | data     | Input-schema module, or `nil` for input-less actions (§4)                                                                                                                                                 |
 | `load_subject/2`         | no (default `:no_subject`) | function | Fetch the subject — the URL-anchored record the action operates on _or within_ (the updated record in patch mode; the parent in create-under-parent). Always invoked. Default is a no-op; `nil` → `:not_found` |
-| `authorize/1`    | no (default `true`)   | function | `(ctx) → boolean \| {:error, reason}`                                                                                                                                                                     |
+| `authorize/1`    | yes                   | function | `(ctx) → boolean \| {:error, reason}`. Required: a forgotten policy is indistinguishable from an open write. An open write is a written `true`.                                                            |
 | `validate/2`     | no (default identity) | function | Ordinary changeset pipeline; `(changeset, ctx) → changeset`. Not invoked for `input: nil` actions                                                                                                         |
 | `resolvers/0`    | no (default `[]`)     | data     | Reference-resolution spec (§7)                                                                                                                                                                            |
 | `execute/2`      | yes                   | function | Persist; `(changeset, ctx) → {:ok, term} \| {:error, term}`; runs in transaction                                                                                                                          |
 | `after_commit/2` | no (default `:ok`)    | function | Post-commit side effects (job insertion, analytics); never rolls back                                                                                                                                     |
 
-`use Enact.Action` sets `@behaviour Enact.Action` and `defoverridable` defaults for the optional callbacks. That is its entire body.
+`use Enact.Action` sets `@behaviour Enact.Action` and `defoverridable` defaults for the optional callbacks (`config/0`, `load_subject/2`, `validate/2`, `resolvers/0`, `after_commit/2`). That is its entire body. `input/0`, `authorize/1`, and `execute/2` have no defaults — a missing `authorize/1` is a compile warning and a teaching `ArgumentError` at `run`/`dry_run`.
 
 ### 2.3 Context
 

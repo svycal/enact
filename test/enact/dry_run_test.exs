@@ -28,6 +28,9 @@ defmodule Enact.DryRunTest do
     def resolvers, do: [owner: {:owner_id, &__MODULE__.fetch_owner/2}]
 
     @impl Enact.Action
+    def authorize(_ctx), do: true
+
+    @impl Enact.Action
     def execute(changeset, ctx), do: {:ok, Enact.updates(changeset, ctx)}
 
     def fetch_owner("usr_ok", _ctx), do: {:ok, %{id: 42, name: "Jane"}}
@@ -51,6 +54,9 @@ defmodule Enact.DryRunTest do
     end
 
     @impl Enact.Action
+    def authorize(_ctx), do: true
+
+    @impl Enact.Action
     def execute(changeset, ctx), do: {:ok, Enact.updates(changeset, ctx)}
   end
 
@@ -67,6 +73,9 @@ defmodule Enact.DryRunTest do
     def load_subject(_params, _ctx), do: Process.get(:enact_subject)
 
     @impl Enact.Action
+    def authorize(_ctx), do: true
+
+    @impl Enact.Action
     def execute(_changeset, ctx), do: {:ok, ctx.subject}
   end
 
@@ -81,6 +90,9 @@ defmodule Enact.DryRunTest do
 
     @impl Enact.Action
     def load_subject(_params, _ctx), do: Process.get(:enact_subject)
+
+    @impl Enact.Action
+    def authorize(_ctx), do: true
 
     @impl Enact.Action
     def execute(_changeset, ctx), do: {:ok, ctx.subject}

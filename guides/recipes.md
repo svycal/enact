@@ -130,6 +130,9 @@ defmodule MyApp.Customers.Actions.UpdateCustomer do
   def load_subject(%{"id" => id}, ctx), do: Customers.get_customer(ctx.actor, id)
 
   @impl Enact.Action
+  def authorize(ctx), do: MyApp.Policy.can?(ctx.actor, :update, ctx.subject)
+
+  @impl Enact.Action
   def execute(changeset, ctx) do
     updates =
       changeset

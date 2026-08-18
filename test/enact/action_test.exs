@@ -8,6 +8,9 @@ defmodule Enact.ActionTest do
     def input, do: nil
 
     @impl Enact.Action
+    def authorize(_ctx), do: true
+
+    @impl Enact.Action
     def execute(_changeset, _ctx), do: {:ok, :done}
   end
 
@@ -36,10 +39,23 @@ defmodule Enact.ActionTest do
 
     assert BareAction.config() == []
     assert BareAction.load_subject(%{}, ctx) == :no_subject
-    assert BareAction.authorize(ctx) == true
     assert BareAction.validate(changeset, ctx) == changeset
     assert BareAction.resolvers() == []
     assert BareAction.after_commit(:result, ctx) == :ok
+  end
+
+  test "optional callbacks are declared; authorize/1 is required" do
+    optional = Enact.Action.behaviour_info(:optional_callbacks)
+
+    assert {:config, 0} in optional
+    assert {:load_subject, 2} in optional
+    assert {:validate, 2} in optional
+    assert {:resolvers, 0} in optional
+    assert {:after_commit, 2} in optional
+
+    refute {:authorize, 1} in optional
+    refute {:input, 0} in optional
+    refute {:execute, 2} in optional
   end
 
   test "defaults are overridable" do

@@ -168,6 +168,9 @@ defmodule Enact.GuardrailsTest do
       def input, do: Enact.GuardrailsTest.DefaultField
 
       @impl Enact.Action
+      def authorize(_ctx), do: true
+
+      @impl Enact.Action
       def execute(_changeset, _ctx), do: {:ok, :done}
     end
 

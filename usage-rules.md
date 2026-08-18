@@ -63,6 +63,7 @@ end
 ```
 
 - `config/0`, `input/0`, and `resolvers/0` return **pure data**. `load_subject/2`, `authorize/1`, `validate/2`, `execute/2`, `after_commit/2` are **single-purpose functions**. Keep that dichotomy.
+- `authorize/1` is required. An open write is a written `true` (`def authorize(_ctx), do: true`), never an omitted callback — a forgotten policy is indistinguishable from allowing every non-anonymous actor.
 - The URL-anchored record is the **subject** → override `load_subject/2` (the updated record in patch mode; the parent in create-under-parent). The default is a no-op (`:no_subject`); `nil` means `:not_found`. Body-referenced public ids → `resolvers/0`. No other fetching channel.
 - `load_subject/2` and every resolver fetcher **must scope by a trust anchor**: the actor's tenant when authenticated; a public-by-construction subject for `anonymous?: true` actions. Returning `nil` from `load_subject/2` produces `:not_found` — cross-tenant probes must be indistinguishable from nonexistent records.
 - Never invent error atoms. The taxonomy is closed: `:invalid`, `:forbidden`, `:not_found`, `:conflict`, `:internal`. To signal a race from `execute/2`, return `{:error, Enact.Error.conflict(:reason)}`.

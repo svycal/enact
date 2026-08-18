@@ -339,6 +339,7 @@ defmodule Enact do
   defp build(action, params, opts) do
     actor = fetch_actor!(opts)
     config = action.config()
+    ensure_authorize!(action)
     mode = fetch_mode!(action, config)
 
     case action.input() do
@@ -407,6 +408,15 @@ defmodule Enact do
     Keyword.get(opts, :repo) || Application.get_env(:enact, :repo) ||
       raise ArgumentError,
             "no repo configured — pass repo: MyApp.Repo or set `config :enact, repo: MyApp.Repo`"
+  end
+
+  defp ensure_authorize!(action) do
+    unless function_exported?(action, :authorize, 1) do
+      raise ArgumentError, """
+      #{inspect(action)} must implement authorize/1 — an open write is a \
+      written `true`, never an absence. Defaulting to allow is fail-open.
+      """
+    end
   end
 
   defp fetch_mode!(action, config) do

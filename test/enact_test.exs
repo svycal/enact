@@ -29,6 +29,9 @@ defmodule EnactTest do
     def input, do: nil
 
     @impl Enact.Action
+    def authorize(_ctx), do: true
+
+    @impl Enact.Action
     def execute(_changeset, ctx), do: {:ok, ctx.actor}
   end
 
@@ -43,6 +46,9 @@ defmodule EnactTest do
       send(self(), :load_called)
       %Project{id: 1}
     end
+
+    @impl Enact.Action
+    def authorize(_ctx), do: true
 
     @impl Enact.Action
     def execute(_changeset, ctx), do: {:ok, ctx.subject}
@@ -62,6 +68,9 @@ defmodule EnactTest do
 
     @impl Enact.Action
     def validate(_changeset, _ctx), do: raise("validate must not run for input: nil")
+
+    @impl Enact.Action
+    def authorize(_ctx), do: true
 
     @impl Enact.Action
     def execute(changeset, ctx), do: {:ok, {Enact.updates(changeset, ctx), ctx.subject}}
@@ -116,6 +125,9 @@ defmodule EnactTest do
     end
 
     @impl Enact.Action
+    def authorize(_ctx), do: true
+
+    @impl Enact.Action
     def execute(changeset, ctx), do: {:ok, Enact.updates(changeset, ctx)}
   end
 
@@ -124,6 +136,9 @@ defmodule EnactTest do
 
     @impl Enact.Action
     def input, do: nil
+
+    @impl Enact.Action
+    def authorize(_ctx), do: true
 
     @impl Enact.Action
     def execute(_changeset, _ctx), do: {:ok, :done}
@@ -137,6 +152,9 @@ defmodule EnactTest do
 
     @impl Enact.Action
     def input, do: nil
+
+    @impl Enact.Action
+    def authorize(_ctx), do: true
 
     @impl Enact.Action
     def execute(_changeset, _ctx), do: Process.get(:enact_execute_result)
@@ -243,6 +261,9 @@ defmodule EnactTest do
         def input, do: nil
 
         @impl Enact.Action
+        def authorize(_ctx), do: true
+
+        @impl Enact.Action
         def execute(_changeset, _ctx), do: {:ok, :done}
       end
 
@@ -275,6 +296,9 @@ defmodule EnactTest do
         def input, do: nil
 
         @impl Enact.Action
+        def authorize(_ctx), do: true
+
+        @impl Enact.Action
         def execute(_changeset, ctx), do: {:ok, ctx.subject}
       end
 
@@ -295,6 +319,9 @@ defmodule EnactTest do
 
         @impl Enact.Action
         def load_subject(_params, _ctx), do: {:error, :ambiguous_slug}
+
+        @impl Enact.Action
+        def authorize(_ctx), do: true
 
         @impl Enact.Action
         def execute(_changeset, _ctx), do: {:ok, :done}
@@ -318,6 +345,19 @@ defmodule EnactTest do
     test "{:error, reason} produces :forbidden carrying the reason" do
       assert {:error, %Error{type: :forbidden, reason: :wrong_role}} =
                run(ReasonForbiddenAction, %{})
+    end
+
+    test "a missing authorize/1 raises a teaching error" do
+      defmodule NoAuthorizeAction do
+        def config, do: []
+        def input, do: nil
+        def load_subject(_params, _ctx), do: :no_subject
+        def execute(_changeset, _ctx), do: {:ok, :done}
+      end
+
+      assert_raise ArgumentError, ~r/must implement authorize\/1/, fn ->
+        run(NoAuthorizeAction, %{})
+      end
     end
   end
 

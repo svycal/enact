@@ -6,6 +6,9 @@ defmodule Enact.Action do
   defaults for the optional callbacks — that is its entire body; there is
   no DSL and no code generation.
 
+  Required: `input/0`, `authorize/1`, `execute/2`. An open write is a
+  written `authorize/1` returning `true`, never an omitted callback.
+
   Every callback is either pure data (`config/0`, `input/0`, `resolvers/0`)
   or a single-purpose function over `(changeset | params, ctx)`. The runner
   (`Enact.run/3`) orchestrates them as:
@@ -43,9 +46,13 @@ defmodule Enact.Action do
               struct() | nil | :no_subject | {:error, term()}
 
   @doc """
-  Authorizes the actor against the loaded context. `false` (or an error
+  Authorizes the actor against the loaded context. Required — a forgotten
+  policy is indistinguishable from an open write. `false` (or an error
   tuple) produces `:forbidden`. Runs before validate — unauthorized callers
   learn nothing about what's invalid.
+
+  An open write (any non-anonymous actor; or anyone, on `anonymous?: true`
+  actions) is a written `true`, never an omitted callback.
   """
   @callback authorize(ctx :: Context.t()) :: boolean() | {:error, term()}
 
@@ -79,6 +86,14 @@ defmodule Enact.Action do
   """
   @callback after_commit(result :: term(), ctx :: Context.t()) :: term()
 
+  @optional_callbacks [
+    config: 0,
+    load_subject: 2,
+    validate: 2,
+    resolvers: 0,
+    after_commit: 2
+  ]
+
   defmacro __using__(_opts) do
     quote do
       @behaviour Enact.Action
@@ -88,9 +103,6 @@ defmodule Enact.Action do
 
       @impl Enact.Action
       def load_subject(_params, _ctx), do: :no_subject
-
-      @impl Enact.Action
-      def authorize(_ctx), do: true
 
       @impl Enact.Action
       def validate(changeset, _ctx), do: changeset
@@ -103,7 +115,6 @@ defmodule Enact.Action do
 
       defoverridable config: 0,
                      load_subject: 2,
-                     authorize: 1,
                      validate: 2,
                      resolvers: 0,
                      after_commit: 2

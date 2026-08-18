@@ -52,6 +52,9 @@ defmodule Enact.ResolveTest do
     end
 
     @impl Enact.Action
+    def authorize(_ctx), do: true
+
+    @impl Enact.Action
     def execute(changeset, ctx), do: {:ok, {Enact.updates(changeset, ctx), ctx.assigns}}
   end
 
@@ -69,6 +72,9 @@ defmodule Enact.ResolveTest do
 
     @impl Enact.Action
     def resolvers, do: [owner: {:owner_id, &Refs.fetch_owner/2}]
+
+    @impl Enact.Action
+    def authorize(_ctx), do: true
 
     @impl Enact.Action
     def execute(changeset, ctx), do: {:ok, {Enact.updates(changeset, ctx), ctx.assigns}}
@@ -290,6 +296,9 @@ defmodule Enact.ResolveTest do
       def resolvers, do: [owner: {[:settings, :owner_id], &__MODULE__.noop/2}]
 
       @impl Enact.Action
+      def authorize(_ctx), do: true
+
+      @impl Enact.Action
       def execute(_changeset, _ctx), do: {:ok, :done}
 
       def noop(_ids, _ctx), do: %{}
@@ -303,6 +312,9 @@ defmodule Enact.ResolveTest do
 
       @impl Enact.Action
       def resolvers, do: [owner: {[:name, :owner_id], &__MODULE__.noop/2}]
+
+      @impl Enact.Action
+      def authorize(_ctx), do: true
 
       @impl Enact.Action
       def execute(_changeset, _ctx), do: {:ok, :done}
@@ -320,6 +332,9 @@ defmodule Enact.ResolveTest do
       def resolvers, do: [milestone_owners: {[:milestones, :owner_id], &__MODULE__.bad/2}]
 
       @impl Enact.Action
+      def authorize(_ctx), do: true
+
+      @impl Enact.Action
       def execute(_changeset, _ctx), do: {:ok, :done}
 
       def bad(ids, _ctx), do: Enum.map(ids, &{&1, %{}})
@@ -335,6 +350,9 @@ defmodule Enact.ResolveTest do
       def resolvers, do: [deep: {[:milestones, :owner, :id], &__MODULE__.noop/2}]
 
       @impl Enact.Action
+      def authorize(_ctx), do: true
+
+      @impl Enact.Action
       def execute(_changeset, _ctx), do: {:ok, :done}
 
       def noop(_ids, _ctx), do: %{}
@@ -348,6 +366,9 @@ defmodule Enact.ResolveTest do
 
       @impl Enact.Action
       def resolvers, do: [owner: {:oops_id, &Refs.fetch_owner/2}]
+
+      @impl Enact.Action
+      def authorize(_ctx), do: true
 
       @impl Enact.Action
       def execute(_changeset, _ctx), do: {:ok, :done}
@@ -394,6 +415,9 @@ defmodule Enact.ResolveTest do
 
         @impl Enact.Action
         def resolvers, do: [owner: {:owner_id, fn _id, _ctx -> :nope end}]
+
+        @impl Enact.Action
+        def authorize(_ctx), do: true
 
         @impl Enact.Action
         def execute(_changeset, _ctx), do: {:ok, :done}

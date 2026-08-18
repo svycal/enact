@@ -7,7 +7,9 @@ Initial release.
 - `Enact.run/3` and `Enact.dry_run/3` — the `load → cast → authorize →
   validate → resolve → execute → after_commit` pipeline with actor
   enforcement, the closed error taxonomy, and telemetry events
-- `Enact.Action` and `Enact.InputSchema` behaviours; `Enact.Actor` protocol
+- `Enact.Action` and `Enact.InputSchema` behaviours; `Enact.Actor` protocol.
+  `authorize/1` is required (an open write is a written `true`); optional
+  callbacks are declared via `@optional_callbacks`
 - Presence-based change detection: `Enact.provided?/2` and `Enact.updates/2`
 - `Enact.Resolve` — scalar and batch reference resolution with
   enumeration-resistant error rendering

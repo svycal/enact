@@ -90,6 +90,9 @@ defmodule EnactTest.CreateProject do
   def input, do: EnactTest.ProjectInput
 
   @impl Enact.Action
+  def authorize(_ctx), do: true
+
+  @impl Enact.Action
   def execute(changeset, ctx), do: {:ok, Enact.updates(changeset, ctx)}
 end
 
@@ -109,6 +112,9 @@ defmodule EnactTest.UpdateProject do
 
   @impl Enact.Action
   def load_subject(_params, _ctx), do: Process.get(:enact_subject)
+
+  @impl Enact.Action
+  def authorize(_ctx), do: true
 
   @impl Enact.Action
   def execute(changeset, ctx), do: {:ok, Enact.updates(changeset, ctx)}

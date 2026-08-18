@@ -66,6 +66,9 @@ defmodule Enact.PartialEmbedsTest do
     def load_subject(_params, _ctx), do: Process.get(:enact_subject)
 
     @impl Enact.Action
+    def authorize(_ctx), do: true
+
+    @impl Enact.Action
     def execute(changeset, ctx) do
       updates = Enact.updates(changeset, ctx)
 
@@ -85,6 +88,9 @@ defmodule Enact.PartialEmbedsTest do
 
     @impl Enact.Action
     def input, do: PrefInput
+
+    @impl Enact.Action
+    def authorize(_ctx), do: true
 
     @impl Enact.Action
     def execute(changeset, ctx), do: {:ok, Enact.updates(changeset, ctx)}
