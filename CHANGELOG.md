@@ -12,6 +12,8 @@ Initial release.
 - `Enact.Action` and `Enact.InputSchema` behaviours; `Enact.Actor` protocol.
   `authorize/1` is required (an open write is a written `true`); optional
   callbacks are declared via `@optional_callbacks`
+- Usage rules: params are the invocation payload; persistable fields are
+  not passed via `assigns:`
 - Presence-based change detection: `Enact.provided?/2` and `Enact.updates/2`
 - `Enact.Resolve` — scalar and batch reference resolution with
   enumeration-resistant error rendering

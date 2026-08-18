@@ -22,8 +22,9 @@ defmodule Enact do
     * `:assigns` — optional map merged into `ctx.assigns`, the documented
       channel for request metadata (IP, session id) that isn't part of the
       actor. Resolver-stashed keys are merged after and win on collision.
-      Never pass pre-loaded domain records here — record fetching belongs
-      in `load_subject/2` (URL subject) or `resolvers/0` (body references).
+      Never pass pre-loaded domain records or persistable fields here —
+      fetching belongs in `load_subject/2` / `resolvers/0`; persistable
+      values are params or stamped in `execute/2`.
 
   Unknown options raise `ArgumentError` — a misspelled option (an
   `assigns:` typo, or worse, a `confirm_digest:` typo silently skipping

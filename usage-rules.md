@@ -6,8 +6,9 @@ Rules for writing application code in a project that uses Enact. Enact standardi
 
 - Every write goes through `Enact.run(ActionModule, params, actor: actor)`. Never write via `Repo.insert/update/delete` from context functions — actions are the only write path.
 - Callers may pass atom- or string-keyed maps. The runner stringifies keys before any callback runs, so `load_subject/2` and `ctx.params` always see strings. Match `%{"id" => id}`, never `params[:id]`. Values are not rewritten.
+- Params are the invocation payload, not "what a human typed." Jobs and `:system` are callers. A value this run is *saying* — something that will be persisted and previewed — belongs in params on an action whose `authorize/1` allows that caller.
 - `actor:` is required and `actor: nil` raises. For unauthenticated callers pass an explicit anonymous actor (`:anonymous`, or a scope struct whose `Enact.Actor` impl returns `true`), and only against actions declaring `anonymous?: true` in `config/0`.
-- Pass request metadata (IP, session id) via `assigns: %{}`. **Never** pass pre-loaded domain records through `assigns:` — the subject is fetched by `load_subject/2`, payload references by `resolvers/0`. Actions are self-contained; the extra query is the price.
+- Pass request metadata (IP, session id) via `assigns: %{}`. **Never** pass pre-loaded domain records or persistable fields through `assigns:` — records are fetched by `load_subject/2` / `resolvers/0`; persistable fields smuggled here skip cast, `updates/2`, preview, and the digest. Actions are self-contained; the extra query is the price.
 - The same calling convention applies from controllers, background jobs, tests, and IEx. There is no internal-bypass path.
 - For confirmation flows: `Enact.dry_run/3` returns an `%Enact.Preview{}`; pass `preview.digest` back to `run/3` as `confirm_digest:`. A mismatch returns `:conflict`.
 
@@ -69,6 +70,7 @@ end
 - `load_subject/2` and every resolver fetcher **must scope by a trust anchor**: the actor's tenant when authenticated; a public-by-construction subject for `anonymous?: true` actions. Returning `nil` from `load_subject/2` produces `:not_found` — cross-tenant probes must be indistinguishable from nonexistent records.
 - Never invent error atoms. The taxonomy is closed: `:invalid`, `:forbidden`, `:not_found`, `:conflict`, `:internal`. To signal a race from `execute/2`, return `{:error, Enact.Error.conflict(:reason)}`.
 - In `execute/2`: build the write from `Enact.updates(changeset, ctx)` — **never** from bare `apply_changes/1` (it erases omitted-vs-provided). Translate public ids by reading `ctx.assigns` (e.g. `ctx.assigns.owner.id`). The updates map is persistence-ready: embeds arrive as plain maps, so feed it straight to your persistence changeset. Declare DB constraints; the runner promotes constraint-error changesets to `:invalid`.
+- Values the action decides (tenant, parent id, default permissions) are stamped in `execute/2` from `ctx.actor`, `ctx.subject`, or policy — not passed in. Do not give one field two sources (params for users, assigns for the system). Split the action or the input module when the payloads differ.
 - `after_commit/2` is for post-commit side effects only (job insertion, analytics). It runs outside the transaction and can never roll back.
 - Archive/cancel/resend-style actions: `mode: :patch, input: nil` plus an overridden `load_subject/2` — preconditions go in `authorize/1`, subject checks in `load_subject/2`.
 
