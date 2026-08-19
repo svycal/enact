@@ -16,6 +16,9 @@ Initial release.
   not passed via `assigns:`
 - Phoenix guide: application callers use context one-liners that forward
   to `Enact.run/3` / `dry_run/3`
+- `Enact.Delegates` — opt-in `use` that generates those one-liners
+  (`create_contact/2` and `create_contact_dry_run/2`) from
+  `actions: [CreateContact, ...]`
 - Presence-based change detection: `Enact.provided?/2` and `Enact.updates/2`
 - `Enact.Resolve` — scalar and batch reference resolution with
   enumeration-resistant error rendering

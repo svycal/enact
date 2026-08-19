@@ -34,6 +34,20 @@ end
 
 Keep those bodies as a single `Enact.run` / `Enact.dry_run` call. Do not reshape params, stamp persistable fields, or preload records into `assigns:` — that work belongs in the action (`execute/2`, `load_subject/2`, `resolvers/0`). `opts` pass through unchanged so `:actor`, `:repo`, `:assigns`, and `:confirm_digest` work as they do on `Enact.run/3`.
 
+The one-liners may be generated instead of written by hand:
+
+```elixir
+defmodule MyApp.Projects do
+  alias MyApp.Projects.Actions.{ArchiveProject, CreateProject, UpdateProject}
+
+  use Enact.Delegates, actions: [CreateProject, UpdateProject, ArchiveProject]
+
+  # reads and load_subject fetchers stay here
+end
+```
+
+Names come from the last segment of each action module (`CreateProject` → `create_project` / `create_project_dry_run`). Both wrappers are generated for every listed action. Handwritten delegates remain valid; the helper is opt-in.
+
 Action tests and IEx may still call `Enact.run/3` directly. That is the implementation API, not a second door for controllers.
 
 ## The actor: your scope struct

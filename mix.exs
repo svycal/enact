@@ -64,6 +64,7 @@ defmodule Enact.MixProject do
         "Behaviours & protocols": [Enact.Action, Enact.InputSchema, Enact.Actor],
         Data: [Enact.Context, Enact.Error, Enact.Preview],
         "Pipeline support": [Enact.Resolve, Enact.Validations, Enact.Guardrails],
+        "Host helpers": [Enact.Delegates],
         Testing: [Enact.Test]
       ]
     ]

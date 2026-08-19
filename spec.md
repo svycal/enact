@@ -12,11 +12,11 @@ Target size: roughly 300–350 lines total (runner, Context, Error, Preview, Res
 
 ### Non-goals (decided, do not revisit during implementation)
 
-- **No DSL / no macro code generation.** The only macro is `use Enact.Action`, which sets `@behaviour` and default callback implementations. Nothing else. Rationale: debuggability, greppability, AI-coding-agent navigability, and reversibility — a DSL frontend can be layered on later as optional sugar; the reverse migration is much harder.
+- **No DSL / no macro code generation inside actions or input schemas.** `use Enact.Action` and `use Enact.InputSchema` set `@behaviour` and defaults/imports only. Rationale: debuggability, greppability, AI-coding-agent navigability, and reversibility. Optional host-side sugar (`use Enact.Delegates`) may generate the documented context one-liners; it must not become an action-definition DSL.
 - **No custom changeset or validation library.** `Ecto.Changeset` is the one and only changeset. `Enact.Validations` contains a small number of helpers that _compose into_ Ecto pipelines, never replacements for `validate_*` functions.
 - **No third-party validation dependency** (Peri, Drops, etc.). Revisit only if a census of real actions shows nested input is pervasive enough that per-shape input modules become a tax paid everywhere.
 - **No OpenAPI generation from input schemas, and no knowledge of any API-documentation library** (OpenApiSpex included). The package exposes introspection manifests (`fields/1`, `resolvers/0`); host apps hand-write their doc schemas (the public contract should change only by deliberate act) and prevent drift with a host-side reconciliation test against those manifests (§10), not codegen.
-- **No raising variant (`run!`)**, no code-interface sugar (`define :create_project`), no imperative `resolve/2` escape hatch. All deferred under the second-use rule: introduce only when a real caller demonstrates need.
+- **No raising variant (`run!`)**, no Ash-style `define :create_project` code interface, no imperative `resolve/2` escape hatch. Context one-liners stay `(params, opts) → Enact.run/3 | dry_run/3`; hosts may write them by hand or generate them with `use Enact.Delegates`.
 
 ## 2. Public API
 
@@ -43,12 +43,13 @@ Enact.dry_run(ActionModule, params, actor: actor)
 # Returns: {:ok, %Enact.Preview{}} | {:error, %Enact.Error{}}   — see §12
 ```
 
-- The actor is always an explicit, required option. No ambient/process-dictionary context. Every write path is greppable via `Enact.run` and must answer "as whom?" — actorless writes are unrepresentable by construction (valuable for audit/compliance posture).
+- The actor is always an explicit, required option. No ambient/process-dictionary context. Every write path is greppable via `Enact.run` (or `use Enact.Delegates` at a context that forwards to it) and must answer "as whom?" — actorless writes are unrepresentable by construction (valuable for audit/compliance posture).
 - **`actor: nil` always raises `ArgumentError`** (message points at anonymous actors, §2.4): nil is indistinguishable from a forgotten actor — anonymity must be a pattern-matchable value, never an absence. The deliberate collision with Phoenix's `current_scope: nil` forces public-endpoint callers to construct an explicit anonymous actor at the boundary.
 - The actor is **opaque to Enact** — only the host app's `authorize/1` and fetchers read it. Any term works, with no Phoenix dependency; in Phoenix 1.8+ apps the recommended actor is the scope struct (`actor: conn.assigns.current_scope`), whose role Enact actions naturally inherit.
 - `run/3` and `dry_run/3` accept an optional `assigns: %{}` passthrough merged into `ctx.assigns` — the documented channel for request metadata (IP, session id) that isn't part of the actor. Resolver-stashed keys are merged after and win on collision. Persistable field values belong in params (what this invocation said) or are stamped in `execute/2` from `ctx`; the passthrough is not a second input channel.
 - Callers never choose the mode; mode is the action's identity via `config/0`.
 - Same calling convention from controllers, background jobs, tests, IEx. No internal-bypass path.
+- Application callers typically go through a context function (`Projects.create_project(params, opts)`). Those functions are one-liners that forward to `run/3` / `dry_run/3`. Hosts may write them by hand or generate them with `use Enact.Delegates, actions: [CreateProject, ...]` (names from the last module segment, underscored). The action module remains the write; the helper is opt-in sugar, not a second API.
 - **Params keys are stringified at the `run`/`dry_run` boundary** (Oban-shaped: atoms at the call site, Plug/JSON strings inside). Values are untouched. Nested plain maps and lists of maps are walked; structs are values and are not walked. Both `:id` and `"id"` at the same level raises — the pair is ambiguous. Inside `load_subject/2` and `ctx.params`, match `%{"id" => id}`, never `params[:id]`.
 
 ### 2.2 The behaviour
@@ -455,6 +456,7 @@ Invocation: memoized first-`run` check, **plus** a CI test that calls it on ever
 | `Enact.Validations` | changeset-pipeline combinators: `check/2`, `unique/3`                                                                             | 30     |
 | `Enact.Guardrails`  | recursive input-schema assertions                                                                                                 | 40     |
 | `Enact.Test`        | `assert_invalid/2`, `assert_rejects_empty_strings/3`, ctx builder, shared test support                                            | 60     |
+| `Enact.Delegates`   | opt-in `use` that generates context `run` / `dry_run` one-liners from action modules                                             | 40     |
 
 Packaging: ships as a Hex package from the start, so it can be shared across multiple host applications.
 
