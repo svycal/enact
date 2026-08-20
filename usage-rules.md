@@ -10,7 +10,7 @@ Rules for writing application code in a project that uses Enact. Enact standardi
 - `actor:` is required and `actor: nil` raises. For unauthenticated callers pass an explicit anonymous actor (`:anonymous`, or a scope struct whose `Enact.Actor` impl returns `true`), and only against actions declaring `anonymous?: true` in `config/0`.
 - Pass request metadata (IP, session id) via `assigns: %{}`. **Never** pass pre-loaded domain records or persistable fields through `assigns:` — records are fetched by `load_subject/2` / `resolvers/0`; persistable fields smuggled here skip cast, `updates/2`, preview, and the digest. Actions are self-contained; the extra query is the price.
 - The same calling convention applies from controllers, background jobs, tests, and IEx. There is no internal-bypass path.
-- For confirmation flows: the context's `*_dry_run` one-liner (or `Enact.dry_run/3`) returns an `%Enact.Preview{}`; pass `preview.digest` back as `confirm_digest:`. A mismatch returns `:conflict`.
+- For confirmation flows: the context's `*_dry_run` one-liner (or `Enact.dry_run/3`) returns an `%Enact.Preview{}`; pass `preview.digest` back as `confirm_digest:`. A mismatch returns `:conflict`. Compare `preview.updates` against `preview.subject` for old → new diffs. Resolved structs stay out of the preview (`resolved` is names only).
 
 ## Organizing modules
 
@@ -112,7 +112,7 @@ Omitted key → untouched. Explicit `null` → clears the scalar. Array key pres
 ## Testing
 
 - `import Enact.Test` for `assert_invalid/2`, `build_ctx/1`, `errors_on/1`.
-- Host apps own five test obligations per the design spec: guardrails-in-CI, the cross-tenant sweep, the PATCH/create matrices, projection completeness, and resolver coverage. See the "Testing Host Applications" guide for templates.
+- Host apps own the tests that depend on their actions, schemas, and tenancy: guardrails-in-CI, the cross-tenant sweep, the PATCH/create matrices, projection completeness, and resolver coverage. See the "Testing Host Applications" guide for templates.
 
 ## Worked examples
 

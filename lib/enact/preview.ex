@@ -7,7 +7,9 @@ defmodule Enact.Preview do
       normalization "what will be persisted" map. What the user confirms
       is definitionally what executes. Patch previews carry only the
       provided keys; host apps render old → new diffs by comparing against
-      the subject.
+      `subject`.
+    * `subject` — the record `load_subject/2` returned, or `nil`. Compare
+      `updates` against it for old → new diffs. Not part of the digest.
     * `resolved` — names of resolvers that succeeded. Never the loaded
       structs — those stay in `ctx.assigns` and never reach the caller.
     * `digest` — canonical hash binding the action, mode, and updates
@@ -20,12 +22,13 @@ defmodule Enact.Preview do
   `:invalid`/`:conflict` normally.
   """
 
-  defstruct [:action, :mode, :updates, :resolved, :digest]
+  defstruct [:action, :mode, :updates, :subject, :resolved, :digest]
 
   @type t :: %__MODULE__{
           action: module(),
           mode: :create | :patch,
           updates: map(),
+          subject: struct() | nil,
           resolved: [atom()],
           digest: String.t()
         }

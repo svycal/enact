@@ -1,6 +1,6 @@
 # Testing Host Applications
 
-Enact's own suite covers the pipeline mechanics. Five test obligations belong to the host application because they depend on your actions, schemas, and tenancy model. This guide provides templates for each. Import only the helpers you need — `import Enact.Test, only: [assert_invalid: 2, assert_rejects_empty_strings: 2, build_ctx: 1]`. Phoenix `DataCase` already defines `errors_on/1`; use that, or call `Enact.Test.errors_on/1` if the host has no helper. A blanket `import Enact.Test` will collide on `errors_on/1`.
+Enact's own suite covers the pipeline mechanics. Write these tests in the host application; they depend on your actions, schemas, and tenancy model. Import only the helpers you need — `import Enact.Test, only: [assert_invalid: 2, assert_rejects_empty_strings: 2, build_ctx: 1]`. Phoenix `DataCase` already defines `errors_on/1`; use that, or call `Enact.Test.errors_on/1` if the host has no helper. A blanket `import Enact.Test` will collide on `errors_on/1`.
 
 ## The action registry
 
@@ -85,23 +85,31 @@ end
 
 `valid_params_for/2` and `put_reference/3` are application-specific: a per-action map of known-good params, with the reference field swapped. The scalar spec form is a field atom; the batch form is `[embed_field, item_field]`.
 
-Anonymous variants of the same sweep:
+Anonymous-capable actions (`anonymous?: true`) scope fetchers through the subject's tenant, not the actor. Run each as an anonymous actor against a reference in another tenant:
 
 ```elixir
-test "actions without anonymous?: true reject anonymous actors" do
+test "anonymous actions do not resolve references outside the subject's tenant" do
   for action <- MyApp.Actions.all(),
-      not Keyword.get(action.config(), :anonymous?, false) do
-    assert {:error, %Enact.Error{type: :forbidden}} =
-             Enact.run(action, %{}, actor: :anonymous)
-  end
-end
+      Keyword.get(action.config(), :anonymous?, false),
+      {_name, {spec, _fetcher}} <- action.resolvers() do
+    subject = public_subject_for(action, org_fixture())
+    foreign = user_fixture(org: org_fixture())
 
-test "actor: nil raises everywhere" do
-  for action <- MyApp.Actions.all() do
-    assert_raise ArgumentError, fn -> Enact.run(action, %{}, actor: nil) end
+    params =
+      valid_anonymous_params_for(action, subject)
+      |> put_reference(spec, foreign.public_id)
+
+    changeset = assert_invalid(Enact.run(action, params, actor: :anonymous))
+
+    for {_field, messages} <- errors_on(changeset), message <- List.wrap(messages) do
+      assert message == "not found",
+             "#{inspect(action)} leaked a precise message for a foreign reference: #{message}"
+    end
   end
 end
 ```
+
+`public_subject_for/2` and `valid_anonymous_params_for/2` are application-specific: a visible-by-slug subject in one tenant, and params that load it.
 
 ## 3. The PATCH matrix (per patch action)
 
@@ -281,7 +289,3 @@ end
 ```
 
 The probe checks behavior, not mechanism: it passes for modules using `Enact.InputSchema.cast_input/4` and for modules using stock `cast` with `empty_values: []`. Pass `except:` for fields whose custom types accept `""` deliberately.
-
-## Dry-run additions
-
-For any action exposed through a confirmation flow: assert that `dry_run` performs no writes, that `preview.updates` equals what an identical `run` persists, and that a mismatched or cross-action `confirm_digest` returns `:conflict`.

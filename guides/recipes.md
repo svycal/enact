@@ -217,7 +217,7 @@ end
 
 ## 4. Dry-run previews in an MCP response
 
-A two-phase confirmation flow for an agent-facing tool. `preview.updates` is plain atom-keyed data, embeds included, so it JSON-encodes directly. The digest, not the serialized display, carries confirmation integrity, so the display format can be reshaped freely.
+A two-phase confirmation flow for an agent-facing tool. `preview.updates` is plain atom-keyed data, embeds included, so it JSON-encodes directly. Serialize `preview.subject` for the current side of the diff. The digest, not the serialized display, carries confirmation integrity, so the display format can be reshaped freely.
 
 ```elixir
 defmodule MyAppWeb.MCP.UpdateProjectTool do
@@ -227,9 +227,8 @@ defmodule MyAppWeb.MCP.UpdateProjectTool do
   def call(params, scope) do
     case Projects.update_project_dry_run(params, actor: scope) do
       {:ok, preview} ->
-        # old → new diff: the host owns reads, so fetch current values directly
         current =
-          Projects.get_project(scope, params["id"])
+          preview.subject
           |> Projects.serialize()
           |> Map.take(Map.keys(preview.updates))
 
@@ -456,7 +455,7 @@ end
 A confirmation preview serves two purposes. The digest binds the delta: the exact change the user confirms. The display provides context: the current and resulting values. Bind the delta; display both. Extending recipe 4's response shape:
 
 ```elixir
-current = Scheduling.serialize(link).booking_policy
+current = Scheduling.serialize(preview.subject).booking_policy
 resulting = Map.merge(current, preview.updates.booking_policy)
 
 %{

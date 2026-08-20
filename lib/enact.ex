@@ -105,9 +105,10 @@ defmodule Enact do
 
   Built for confirmation flows (agent-facing surfaces, MCP tools): the
   preview reflects the casted, normalized updates back for confirmation,
-  and its digest feeds `run/3`'s `:confirm_digest` option. Authorization
-  runs (don't preview what you can't do), and distinct telemetry events
-  are emitted so audit trails never conflate previews with executions.
+  carries the loaded subject for old → new diffs, and its digest feeds
+  `run/3`'s `:confirm_digest` option. Authorization runs (don't preview
+  what you can't do), and distinct telemetry events are emitted so audit
+  trails never conflate previews with executions.
 
   Params keys are stringified exactly as in `run/3`.
   """
@@ -127,6 +128,7 @@ defmodule Enact do
              action: action,
              mode: ctx.mode,
              updates: updates,
+             subject: ctx.subject,
              resolved: resolved,
              digest: Preview.digest(action, ctx.mode, updates)
            }}

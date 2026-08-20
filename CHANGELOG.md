@@ -25,7 +25,7 @@ Initial release.
 - `Enact.Validations` (`check/2`, `unique/3`) and `Enact.Guardrails`
   (mechanical input-schema invariants)
 - `Enact.Preview` with a confirmation digest binding action, mode, and the
-  canonical updates map
+  canonical updates map; `subject` is the loaded record for old → new diffs
 - `Enact.InputSchema.cast_input/4` — casting with JSON API empty-string
   semantics derived from field types (`keep_empty_strings:` option)
 - `partial_embeds/1` input-schema manifest — partial-object PATCH

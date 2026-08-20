@@ -145,7 +145,7 @@ Every failure is an `%Enact.Error{}` with one of five HTTP-shaped types: `:inval
 
 ## Dry runs and confirmation
 
-`Enact.dry_run/3` runs everything up to (not including) execute and returns an `%Enact.Preview{}` — the exact updates map a real run would persist, plus a digest for confirmation flows:
+`Enact.dry_run/3` runs everything up to (not including) execute and returns an `%Enact.Preview{}` — the exact updates map a real run would persist, the loaded subject, and a digest for confirmation flows:
 
 ```elixir
 {:ok, preview} = Projects.update_project_dry_run(params, actor: actor)
@@ -170,5 +170,5 @@ The runner emits `[:enact, :action, :run]`, `[:enact, :action, :run, :error]`, a
 - [Change Detection](guides/change-detection.md) — how the validation base, presence-gated extraction, and PATCH fidelity actually work, and why `force_changes:`-style workarounds never appear
 - [Phoenix Integration](guides/phoenix-integration.md) — actor/scope wiring, the reference FallbackController and error renderer, Inertia form posts, background jobs, telemetry
 - [Recipes](guides/recipes.md) — worked examples: embedded data end-to-end, flattening embeds into columns, reading resolver assigns, MCP dry-run confirmation flows, empty-string-at-rest columns, partial updates on singular embeds
-- [Testing Host Applications](guides/testing.md) — copy-paste templates for the five host-side test obligations (cross-tenant sweep, PATCH/create matrices, projection completeness, resolver coverage, guardrails in CI)
+- [Testing Host Applications](guides/testing.md) — copy-paste templates for the host-side test obligations (cross-tenant sweep, PATCH/create matrices, projection completeness, resolver coverage, guardrails in CI)
 - [Design Specification](spec.md) — the authoritative design, including the rationale for every decision

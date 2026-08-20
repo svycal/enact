@@ -433,7 +433,7 @@ Invocation: memoized first-`run` check, **plus** a CI test that calls it on ever
 1. **Doc-schema reconciliation (host-app test):** the package's role ends at the introspection manifests (`fields/1`, `resolvers/0`); it knows nothing of OpenApiSpex or any other documentation library and must never grow such a dependency (§1 non-goals). Host apps write a drift test zipping `Input.fields(mode)` against their API-doc source of truth — for OpenApiSpex, each request schema's properties (extendable to types/required).
    - **Resolver coverage (host-app test, package manifests only):** every `*_id` input field has a `resolvers/0` entry, with an explicit per-action allowlist for legitimately opaque `_id` fields (external references, idempotency keys) — exceptions stay visible instead of weakening the rule. Catches "added reference, forgot resolver," which otherwise sends a raw public-id string to persistence.
 2. **Cross-tenant sweep:** every action run with a tenant-A actor against tenant-B subject and references → `:not_found` / field errors, and foreign-reference field errors carry only the generic `"not found"` message (never a precise one). Enumerates reference fields from `resolvers/0` specs.
-   - **Anonymous variants:** every `anonymous?: true` action run as an anonymous actor against references outside the subject's tenant → field errors; every action _without_ `anonymous?: true` run as an anonymous actor → `:forbidden`; `actor: nil` raises everywhere.
+   - **Anonymous variants:** every `anonymous?: true` action run as an anonymous actor against references outside the subject's tenant → field errors (fetchers must scope through the public subject, not the actor).
 3. **PATCH matrix** per patch action: omitted key untouched; explicit nil clears scalar; explicit nil on a required field → `:invalid`; omitted required-but-populated field passes `validate_required`; `[]` clears array (presence-gated validations still run); provided-identical persists as a harmless no-op write; provided reference re-resolves; absent reference survives.
 4. **Create matrix:** omitted optional falls to DB default; explicit nil on required field fails `validate_required`.
 5. **Guardrails:** all input modules pass `assert_valid_input_schema!`; a fixture module with a default/PK/association raises with the expected message.
@@ -481,6 +481,8 @@ Enact.dry_run(ActionModule, params, actor: actor)
    mode: :patch,
    # Enact.updates/2 output — casted, normalized, validated
    updates: %{...},
+   # the loaded URL-anchored record (nil when there is no subject)
+   subject: %Project{...},
    # names of resolvers that succeeded — never the structs
    resolved: [:owner],
    # hash binding action, mode, and the canonical updates map
@@ -497,10 +499,11 @@ Design decisions:
 - **Confirmation digest.** `dry_run` digests the action module, the mode, and the canonically-encoded updates map together (deterministic encoding — sorted keys, stable struct/date encoding; Elixir map ordering is not sufficient). Folding action and mode into the hash makes the guarantee total: a digest minted for one action or mode never confirms another, and input-less actions (whose updates are always `%{}`) don't collapse to one shared digest. `run/3` accepts optional `confirm_digest:`, recomputes post-validation, and returns `:conflict` on mismatch: "the user confirmed _this exact change_" becomes a mechanical guarantee across the confirmation gap. Non-confirmation callers never see it.
 - **No reservation semantics (non-goal).** A preview is not a promise; the confirming `run/3` re-executes the full pipeline, and races surface as `:invalid`/`:conflict` normally. If a domain needs "hold this resource during confirmation", model it as an explicit domain action (a hold with a TTL), never as dry-run machinery.
 - **Resolved references leak nothing.** The preview lists resolver _names_ that succeeded; loaded structs stay in `ctx.assigns` and never reach the caller (field-leakage risk toward agents). If confirmation UX needs display info ("assigning to Jane Doe"), that is host-app rendering; a `preview/2` option on resolver specs is a deferred second-use extraction (§13).
-- **Patch previews carry the provided keys** (`updates/2` semantics, §5.2), and the subject is loaded — host apps render old → new diffs by comparing updates against the subject, no additional machinery.
+- **Preview carries the loaded subject.** `subject` is the record `load_subject/2` returned (the updated record in patch mode; the parent in create-under-parent; `nil` when there is no subject). Host apps render old → new diffs by comparing `updates` against it. The digest does not bind the subject.
+- **Patch previews carry the provided keys** (`updates/2` semantics, §5.2).
 - **Authorization runs in dry runs** (don't preview what you can't do), and dry runs emit distinct telemetry (§8).
 
-Tests (additions to §10): dry_run performs no writes (assert on the Repo); preview `updates` equals what a subsequent `run` persists for identical params; digest mismatch returns `:conflict`; digest match with changed world state still re-validates; preview never contains resolved structs.
+Tests (additions to §10): dry_run performs no writes (assert on the Repo); preview `updates` equals what a subsequent `run` persists for identical params; preview `subject` is the loaded record (`nil` when there is none); digest mismatch returns `:conflict`; digest match with changed world state still re-validates; preview never contains resolved structs.
 
 ## 13. Deferred (second-use rule — do not implement now)
 

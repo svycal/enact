@@ -112,27 +112,32 @@ defmodule Enact.DryRunTest do
       assert previewed == persisted
     end
 
-    test "carries action, mode, and a digest" do
+    test "carries action, mode, subject, and a digest" do
       assert {:ok, preview} = dry_run(CreateProject, @valid)
 
       assert preview.action == CreateProject
       assert preview.mode == :create
+      assert preview.subject == nil
       assert "sha256:" <> _ = preview.digest
     end
 
-    test "patch previews carry only the provided keys" do
-      Process.put(:enact_subject, %Project{id: 1, name: "Old", slug: "old", priority: 3})
+    test "patch previews carry the loaded subject and only the provided keys" do
+      project = %Project{id: 1, name: "Old", slug: "old", priority: 3}
+      Process.put(:enact_subject, project)
 
       assert {:ok, preview} = dry_run(UpdateProject, %{"priority" => 9})
       assert preview.mode == :patch
       assert preview.updates == %{priority: 9}
+      assert preview.subject == project
     end
 
-    test "input: nil actions preview empty updates" do
-      Process.put(:enact_subject, %Project{id: 7})
+    test "input: nil actions preview empty updates and the loaded subject" do
+      project = %Project{id: 7}
+      Process.put(:enact_subject, project)
 
-      assert {:ok, %Preview{updates: updates}} = dry_run(Archive, %{})
+      assert {:ok, %Preview{updates: updates, subject: subject}} = dry_run(Archive, %{})
       assert updates == %{}
+      assert subject == project
     end
 
     test "resolved lists resolver names, never the loaded structs" do
