@@ -49,9 +49,20 @@ defmodule Enact.Action do
 
   @doc """
   Authorizes the actor against the loaded context. Required — a forgotten
-  policy is indistinguishable from an open write. `false` (or an error
-  tuple) produces `:forbidden`. Runs before validate — unauthorized callers
-  learn nothing about what's invalid.
+  policy is indistinguishable from an open write. Runs before validate —
+  unauthorized callers learn nothing about what's invalid.
+
+  Return values:
+
+    * `true` — proceed
+    * `false` — `{:error, %Enact.Error{type: :forbidden}}`
+    * `{:error, reason}` — `{:error, %Enact.Error{type: :forbidden, reason: reason}}`
+      (`{:error, :foo}` → `{:error, %Enact.Error{type: :forbidden, reason: :foo}}`)
+    * `{:error, %Enact.Error{}}` — passed through
+
+  `reason` is for logs, telemetry, and the host renderer. Do not echo it
+  wholesale. Match host-owned atoms in the renderer when the 403 copy
+  should vary; leave the default opaque.
 
   An open write (any non-anonymous actor; or anyone, on `anonymous?: true`
   actions) is a written `true`, never an omitted callback.

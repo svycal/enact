@@ -215,7 +215,7 @@ defmodule MyAppWeb.ErrorJSON do
     %{errors: Ecto.Changeset.traverse_errors(changeset, &translate_error/1)}
   end
 
-  # Do not serialize error.reason — it is internal-only (logs/telemetry).
+  # Default: generic copy by type. Do not echo error.reason.
   def enact(%{error: %Enact.Error{type: type}}) do
     %{errors: %{detail: detail(type)}}
   end
@@ -234,7 +234,7 @@ defmodule MyAppWeb.ErrorJSON do
 end
 ```
 
-Two renderer policies to decide:
+Renderer policies:
 
 - **404/403 collapse.** Rendering `:forbidden` as 404 prevents responses from revealing that a resource exists. Keep the two types distinct internally; collapse only at the renderer. The policy can be format-specific: HTML (and Inertia) often collapse, JSON APIs often keep 403. Put the clause above the catch-all `%Enact.Error{}` head:
 
@@ -245,6 +245,14 @@ Two renderer policies to decide:
     else
       call(conn, {:error, :forbidden})
     end
+  end
+  ```
+
+- **Forbidden copy.** Default 403 is generic. To vary the message, add a clause that matches a host-owned `reason` from `authorize/1` and keep the generic `:forbidden` head as the fallback. Do not put `reason` in the JSON. Do not do this for `:not_found`.
+
+  ```elixir
+  def enact(%{error: %Enact.Error{type: :forbidden, reason: :link_disabled}}) do
+    %{errors: %{detail: "This scheduling link is disabled"}}
   end
   ```
 
@@ -282,7 +290,7 @@ end
 
 The changeset in a promoted constraint error is the persistence changeset, not the input changeset. Keep constraint-bearing field names aligned with the input schema's names, or re-map them in `execute/2`, so the rendered field addressing matches your API contract.
 
-Some actions should never reflect the persistence changeset to callers — for example, when the action declares no constraints, or when persistence field names do not match the input's. In that case, an unexpected changeset error indicates that validation and persistence have drifted, which is a bug rather than caller input. Log it and return `:internal`. The `reason` field is never serialized, so the caller sees only a generic 500:
+Some actions should never reflect the persistence changeset to callers — for example, when the action declares no constraints, or when persistence field names do not match the input's. In that case, an unexpected changeset error indicates that validation and persistence have drifted, which is a bug rather than caller input. Log it and return `:internal`. The default renderer does not echo `reason`, so the caller sees a generic 500:
 
 ```elixir
 require Logger

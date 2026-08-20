@@ -61,7 +61,7 @@ Every callback is either **pure data** or **a single-purpose function over (chan
 | `config/0`       | no (default `[]`)     | data     | `mode: :create \| :patch` (default `:create`), `anonymous?: boolean` (default `false`, §2.4)                                                                 |
 | `input/0`        | yes                   | data     | Input-schema module, or `nil` for input-less actions (§4)                                                                                                                                                 |
 | `load_subject/2`         | no (default `:no_subject`) | function | Fetch the subject — the URL-anchored record the action operates on _or within_ (the updated record in patch mode; the parent in create-under-parent). Always invoked. Default is a no-op; `nil` → `:not_found` |
-| `authorize/1`    | yes                   | function | `(ctx) → boolean \| {:error, reason}`. Required: a forgotten policy is indistinguishable from an open write. An open write is a written `true`.                                                            |
+| `authorize/1`    | yes                   | function | `(ctx) → boolean \| {:error, reason}`. Required: a forgotten policy is indistinguishable from an open write. An open write is a written `true`. `false` → `:forbidden`; `{:error, reason}` → `:forbidden` carrying `reason` (`{:error, :foo}` → `%Enact.Error{type: :forbidden, reason: :foo}`). |
 | `validate/2`     | no (default identity) | function | Ordinary changeset pipeline; `(changeset, ctx) → changeset`. Not invoked for `input: nil` actions                                                                                                         |
 | `resolvers/0`    | no (default `[]`)     | data     | Reference-resolution spec (§7)                                                                                                                                                                            |
 | `execute/2`      | yes                   | function | Persist; `(changeset, ctx) → {:ok, term} \| {:error, term}`; runs in transaction                                                                                                                          |
@@ -115,7 +115,7 @@ Runner error normalization:
 - No cast-stage fast-fail: `changeset/3` output (cast, required-ness, base validations) flows into `validate/2`, and one `:invalid` is produced after the validate step, in both modes — the caller gets all input errors in a single response. (The runner cannot distinguish cast errors from module validations anyway; `check/2` gates the expensive checks.)
 - `load_subject/2` returning `:no_subject` (the default) → no subject.
 - `load_subject/2` returning nil → `:not_found`.
-- `authorize/1` false → `:forbidden`.
+- `authorize/1` false → `:forbidden`. `{:error, reason}` → `:forbidden` carrying `reason`. `{:error, %Enact.Error{}}` is passed through.
 - Post-validate `changeset.valid? == false` → `:invalid` carrying the changeset.
 - A `%Ecto.Changeset{}` error from `repo.insert/update` (declared constraints) → promoted to `:invalid`, not `:internal`.
 - Any other execute failure → `:internal` (see §8 discipline).
@@ -401,7 +401,7 @@ defstruct [:type, :changeset, :reason, meta: %{}]
 ```
 
 - **Closed taxonomy, HTTP-shaped:** invalid→422, forbidden→403, not_found→404, conflict→409, internal→500. No bespoke error atoms from actions — the renderer must never grow a default clause.
-- **`reason` is internal only** (logs/telemetry), never serialized. The only outward-rich type is `:invalid` via the changeset (safe: describes the caller's own input). Rendering = one `ErrorRenderer` using `traverse_errors/2`; handles nested/indexed embed errors with zero per-action knowledge; it is the API-versioning seam.
+- **`reason`** is a stable term (atom, not a user-facing string) for logs, telemetry, and host rendering. Do not echo it wholesale. `:invalid` is the only type that carries caller-visible detail by default (the changeset — safe: it describes the caller's own input). The default renderer maps `type` to generic copy. The host may translate a closed set of host-owned reasons into copy, typically `:forbidden` from `authorize/1`. Do not use `:not_found` reasons to reveal that a record exists. Rendering = one `ErrorRenderer` using `traverse_errors/2`; handles nested/indexed embed errors with zero per-action knowledge; it is the API-versioning seam.
 - **`:conflict`** for optimistic/temporal races (resource claimed between validation and insert, stale_error_field). Input was fine; the world changed.
 - **404/403 collapse** is renderer policy (defense in depth; tenant-scoped `load_subject/2` mostly produces `:not_found` for cross-tenant probes anyway). Internally keep both types — different bugs.
 - **`:internal` is a bug bucket.** Every production occurrence is either a bug or a missing promotion to a real type. Runner auto-promotes constraint-error changesets from repo failures to `:invalid`.
@@ -438,7 +438,7 @@ Invocation: memoized first-`run` check, **plus** a CI test that calls it on ever
 4. **Create matrix:** omitted optional falls to DB default; explicit nil on required field fails `validate_required`.
 5. **Guardrails:** all input modules pass `assert_valid_input_schema!`; a fixture module with a default/PK/association raises with the expected message.
 6. **Projection completeness** (host-app, per patch-mode input module): `from_subject/1` on a fully-populated fixture subject yields a non-nil value for every scalar field, and leaves embeds at structural defaults — a forgotten or mistranslated field fails CI instead of silently degrading validation behavior for that field.
-7. **Error taxonomy:** each failure class maps to its `Enact.Error` type; `reason` never appears in rendered output; nested resolution errors render at correct indices.
+7. **Error taxonomy:** each failure class maps to its `Enact.Error` type; `reason` is not echoed wholesale; nested resolution errors render at correct indices.
 8. Test helper: `assert_invalid(result, on: field)`.
 
 ## 11. Module inventory

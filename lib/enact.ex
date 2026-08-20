@@ -33,7 +33,9 @@ defmodule Enact do
   ## Error normalization
 
     * `load_subject/2` returning `nil` → `:not_found`
-    * `authorize/1` returning `false` → `:forbidden`
+    * `authorize/1` returning `false` → `:forbidden`; `{:error, reason}` →
+      `:forbidden` with that reason (`{:error, :foo}` becomes
+      `{:error, %Enact.Error{type: :forbidden, reason: :foo}}`)
     * post-validate invalid changeset → `:invalid` (one response carries
       all cast + validation errors; there is no cast-stage fast-fail)
     * `%Ecto.Changeset{}` error from execute (declared constraints) →
