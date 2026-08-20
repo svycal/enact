@@ -263,7 +263,7 @@ defmodule MyAppWeb.MCP.UpdateProjectTool do
 end
 ```
 
-The full pipeline runs again on confirm — authorization, validation, resolution — so a digest match with changed world state still surfaces `:invalid` or `:not_found` normally. The digest only guards against the change itself differing between preview and confirm; it binds the action, mode, and updates map. Both phases emit separate telemetry events, so audit trails count previews and executions separately.
+The full pipeline runs again on confirm — authorization, validation, resolution — so a digest match with changed world state still surfaces `:invalid` or `:not_found` normally. The digest binds the action, mode, locator params, and updates map. Both phases emit separate telemetry events, so audit trails count previews and executions separately.
 
 ## 5. Empty-string-at-rest columns
 

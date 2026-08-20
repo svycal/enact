@@ -12,10 +12,10 @@ defmodule Enact.Preview do
       `updates` against it for old → new diffs. Not part of the digest.
     * `resolved` — names of resolvers that succeeded. Never the loaded
       structs — those stay in `ctx.assigns` and never reach the caller.
-    * `digest` — canonical hash binding the action, mode, and updates
-      map, for the confirmation flow: pass it back as `confirm_digest:`
-      to `Enact.run/3`, which recomputes post-validation and returns
-      `:conflict` on mismatch.
+    * `digest` — canonical hash binding the action, mode, locator params
+      (params keys not in the input schema), and updates map. Pass it
+      back as `confirm_digest:` to `Enact.run/3`, which recomputes
+      post-validation and returns `:conflict` on mismatch.
 
   A preview is not a promise: no reservation semantics. The confirming
   `run/3` re-executes the full pipeline, and races surface as
@@ -35,10 +35,13 @@ defmodule Enact.Preview do
 
   @doc """
   Canonically digests a pending change: `"sha256:..."` over the action
-  module, mode, and updates map together. Folding the action and mode in
-  makes "the user confirmed *this exact change*" total — a digest minted
-  for one action (or mode) never confirms another, and input-less actions
-  (whose updates are always `%{}`) don't collapse to one shared digest.
+  module, mode, locator params, and updates map together. Locator params
+  are params keys not in the input schema (`fields/1`) — typically the
+  URL-anchored subject id. Folding action, mode, and locators in makes
+  "the user confirmed *this exact change* to *this record*" total — a
+  digest minted for one action, mode, or subject never confirms another,
+  and input-less actions (whose updates are always `%{}`) don't collapse
+  across records.
 
   The encoding is hand-rolled and injective — every node is type-tagged,
   binaries and atom names are length-prefixed, and map entries are sorted
@@ -48,11 +51,14 @@ defmodule Enact.Preview do
   releases — digests must survive the confirmation gap in a mixed-version
   rolling deploy.
   """
-  @spec digest(module(), :create | :patch, map()) :: String.t()
-  def digest(action, mode, updates)
-      when is_atom(action) and is_atom(mode) and is_map(updates) do
+  @spec digest(module(), :create | :patch, map(), map()) :: String.t()
+  def digest(action, mode, locators, updates)
+      when is_atom(action) and is_atom(mode) and is_map(locators) and is_map(updates) do
     "sha256:" <>
-      Base.encode16(:crypto.hash(:sha256, encode({action, mode, updates})), case: :lower)
+      Base.encode16(
+        :crypto.hash(:sha256, encode({action, mode, locators, updates})),
+        case: :lower
+      )
   end
 
   defp encode(%module{} = struct),

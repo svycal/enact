@@ -228,10 +228,35 @@ defmodule Enact.DryRunTest do
 
       refute_received {FakeRepo, :transaction}
     end
+
+    test "a digest minted for one subject never confirms another" do
+      Process.put(:enact_subject, %Project{id: 1, name: "Old", slug: "old", priority: 3})
+      params_a = %{"id" => "1", "priority" => 9}
+      params_b = %{"id" => "2", "priority" => 9}
+
+      assert {:ok, preview} = dry_run(UpdateProject, params_a)
+      assert preview.updates == %{priority: 9}
+
+      assert {:ok, _} = run(UpdateProject, params_a, confirm_digest: preview.digest)
+
+      assert {:error, %Error{type: :conflict, reason: :confirm_digest_mismatch}} =
+               run(UpdateProject, params_b, confirm_digest: preview.digest)
+    end
+
+    test "input-less actions bind locator params" do
+      Process.put(:enact_subject, %Project{id: 7})
+
+      assert {:ok, preview} = dry_run(Archive, %{"id" => "7"})
+
+      assert {:error, %Error{type: :conflict, reason: :confirm_digest_mismatch}} =
+               run(Archive, %{"id" => "8"}, confirm_digest: preview.digest)
+
+      refute_received {FakeRepo, :transaction}
+    end
   end
 
-  describe "Preview.digest/3" do
-    defp digest(updates), do: Preview.digest(SomeAction, :create, updates)
+  describe "Preview.digest/4" do
+    defp digest(updates), do: Preview.digest(SomeAction, :create, %{}, updates)
 
     test "is deterministic for equal maps, including large ones" do
       forward = Map.new(1..40, fn i -> {:"key_#{i}", i} end)
@@ -240,9 +265,15 @@ defmodule Enact.DryRunTest do
       assert digest(forward) == digest(backward)
     end
 
-    test "binds the action and mode, not just the updates" do
-      assert Preview.digest(ActionA, :create, %{}) != Preview.digest(ActionB, :create, %{})
-      assert Preview.digest(ActionA, :create, %{}) != Preview.digest(ActionA, :patch, %{})
+    test "binds the action, mode, and locators, not just the updates" do
+      assert Preview.digest(ActionA, :create, %{}, %{}) !=
+               Preview.digest(ActionB, :create, %{}, %{})
+
+      assert Preview.digest(ActionA, :create, %{}, %{}) !=
+               Preview.digest(ActionA, :patch, %{}, %{})
+
+      assert Preview.digest(ActionA, :patch, %{"id" => "1"}, %{}) !=
+               Preview.digest(ActionA, :patch, %{"id" => "2"}, %{})
     end
 
     test "differs when any value changes" do

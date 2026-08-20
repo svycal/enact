@@ -361,4 +361,4 @@ Error events carry `type:` in metadata, so a handler can record entries such as 
   Projects.update_project(params, actor: actor, confirm_digest: preview.digest)
 ```
 
-The digest binds the action, mode, and updates map; any difference between the previewed change and the confirming run returns `:conflict`. Diff `preview.updates` against `preview.subject`. The preview lists resolver names only; if the confirmation UI needs display information (for example, the resolved user's name), render it host-side from your own reads.
+The digest binds the action, mode, locator params, and updates map; any difference between the previewed change and the confirming run returns `:conflict`. Diff `preview.updates` against `preview.subject`. The preview lists resolver names only; if the confirmation UI needs display information (for example, the resolved user's name), render it host-side from your own reads.

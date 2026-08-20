@@ -154,7 +154,7 @@ Every failure is an `%Enact.Error{}` with one of five HTTP-shaped types: `:inval
   Projects.update_project(params, actor: actor, confirm_digest: preview.digest)
 ```
 
-A digest mismatch returns `:conflict` — "the user confirmed this exact change" is a mechanical guarantee.
+A digest mismatch returns `:conflict` — "the user confirmed this exact change to this record" is a mechanical guarantee.
 
 ## Telemetry
 

@@ -67,8 +67,8 @@ defmodule Enact do
   Accepts one option beyond the shared set: `:confirm_digest` — a digest
   from a prior `dry_run/3` preview. The runner recomputes the digest
   post-validation and returns `:conflict` on mismatch, making "the user
-  confirmed this exact change" a mechanical guarantee across the
-  confirmation gap. Non-confirmation callers never pass it.
+  confirmed this exact change to this record" a mechanical guarantee
+  across the confirmation gap. Non-confirmation callers never pass it.
 
   Params may be atom- or string-keyed at the call site. The runner
   stringifies keys (recursively, through plain maps and lists) before
@@ -130,7 +130,7 @@ defmodule Enact do
              updates: updates,
              subject: ctx.subject,
              resolved: resolved,
-             digest: Preview.digest(action, ctx.mode, updates)
+             digest: Preview.digest(action, ctx.mode, locators(action, ctx), updates)
            }}
 
         {:error, error} ->
@@ -380,13 +380,26 @@ defmodule Enact do
     end
   end
 
+  # Params keys not in the input schema — typically the URL-anchored subject id.
+  defp locators(action, ctx) do
+    case action.input() do
+      nil ->
+        ctx.params
+
+      module ->
+        drop = Enum.map(module.fields(ctx.mode), &Atom.to_string/1)
+        Map.drop(ctx.params, drop)
+    end
+  end
+
   defp check_digest(action, changeset, ctx, opts) do
     case Keyword.fetch(opts, :confirm_digest) do
       :error ->
         :ok
 
       {:ok, digest} ->
-        if Preview.digest(action, ctx.mode, updates(changeset, ctx)) == digest do
+        if Preview.digest(action, ctx.mode, locators(action, ctx), updates(changeset, ctx)) ==
+             digest do
           :ok
         else
           {:error, Error.conflict(:confirm_digest_mismatch)}
