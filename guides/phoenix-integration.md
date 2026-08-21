@@ -5,8 +5,8 @@ Enact has no Phoenix dependency. A host application wires four integration point
 ## Setup
 
 ```elixir
-# mix.exs (from GitHub until Enact is published to Hex)
-{:enact, github: "svycal/enact"}
+# mix.exs
+{:enact, "~> 0.1.0"}
 
 # config/config.exs
 config :enact, repo: MyApp.Repo

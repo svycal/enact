@@ -38,7 +38,10 @@ defmodule Enact.MixProject do
   defp package do
     [
       licenses: ["MIT"],
-      links: %{"GitHub" => @source_url},
+      links: %{
+        "GitHub" => @source_url,
+        "Changelog" => "#{@source_url}/blob/v#{@version}/CHANGELOG.md"
+      },
       files:
         ~w(lib guides mix.exs README.md LICENSE CHANGELOG.md usage-rules.md spec.md .formatter.exs)
     ]
@@ -48,8 +51,10 @@ defmodule Enact.MixProject do
     [
       main: "Enact",
       source_url: @source_url,
+      source_ref: "v#{@version}",
       extras: [
         "README.md",
+        "CHANGELOG.md": [title: "Changelog"],
         "usage-rules.md": [title: "Usage Rules"],
         "guides/change-detection.md": [title: "Change Detection"],
         "guides/phoenix-integration.md": [title: "Phoenix Integration"],

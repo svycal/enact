@@ -10,12 +10,10 @@ The value is the uniform pipeline shape, the actor context, and the closed error
 
 ## Installation
 
-Enact isn't published to Hex yet — install it from GitHub:
-
 ```elixir
 def deps do
   [
-    {:enact, github: "svycal/enact"}
+    {:enact, "~> 0.1.0"}
   ]
 end
 ```
