@@ -3,7 +3,7 @@
 A thin, behaviour-based action layer for application write operations. Enact standardizes the shape of every write:
 
 ```
-load → cast → authorize → validate → resolve → execute → after_commit
+load → authorize → cast → validate → resolve → execute → after_commit
 ```
 
 The value is the uniform pipeline shape, the actor context, and the closed error taxonomy — not any novel validation or persistence machinery. **Enact orchestrates; Ecto does the work**: validation is Ecto changesets, input casting is Ecto embedded schemas, persistence is your existing schemas and changesets. No DSL, no parallel type system, no validation vocabulary.
@@ -156,9 +156,23 @@ Every failure is an `%Enact.Error{}` with one of five HTTP-shaped types: `:inval
 
 A digest mismatch returns `:conflict` — "the user confirmed this exact change to this record" is a mechanical guarantee.
 
+## Loading a subject
+
+`Enact.subject/3` loads the action's subject and authorizes the actor. No body, no write. Use it when the GET needs the record (edit, archive confirmation, create-under-parent):
+
+```elixir
+{:ok, project} = Projects.update_project_subject(params, actor: actor)
+```
+
+Failures are `:not_found` or `:forbidden`. An action with no subject raises — use `authorized/3` for a new form:
+
+```elixir
+:ok = Projects.create_project_authorized(%{}, actor: actor)
+```
+
 ## Telemetry
 
-The runner emits `[:enact, :action, :run]`, `[:enact, :action, :run, :error]`, and distinct `[:enact, :action, :dry_run]` events with per-action, per-type metadata — observability and audit trails with zero action-author involvement.
+The runner emits `[:enact, :action, :run]`, `[:enact, :action, :dry_run]`, `[:enact, :action, :subject]`, and `[:enact, :action, :authorized]` events (plus matching `:error` events) with per-action, per-type metadata — observability and audit trails with zero action-author involvement.
 
 ## Testing
 

@@ -4,9 +4,12 @@
 
 Initial release.
 
-- `Enact.run/3` and `Enact.dry_run/3` — the `load → cast → authorize →
-  validate → resolve → execute → after_commit` pipeline with actor
-  enforcement, the closed error taxonomy, and telemetry events.
+- `Enact.run/3`, `Enact.dry_run/3`, `Enact.subject/3`, and
+  `Enact.authorized/3` — the
+  `load → authorize → cast → validate → resolve → execute → after_commit`
+  pipeline with actor enforcement, the closed error taxonomy, and
+  telemetry events. `subject/3` returns the loaded record; `authorized/3`
+  returns `:ok`. Both are load + authorize only (locator params, no body).
   Atom-keyed params are stringified at the boundary (values untouched;
   atom+string collision at the same level raises)
 - `Enact.Action` and `Enact.InputSchema` behaviours; `Enact.Actor` protocol.
@@ -15,9 +18,10 @@ Initial release.
 - Usage rules: params are the invocation payload; persistable fields are
   not passed via `assigns:`
 - Phoenix guide: application callers use context one-liners that forward
-  to `Enact.run/3` / `dry_run/3`
+  to `Enact.run/3` / `dry_run/3` / `subject/3` / `authorized/3`
 - `Enact.Delegates` — opt-in `use` that generates those one-liners
-  (`create_contact/2` and `create_contact_dry_run/2`) from
+  (`create_contact/2`, `create_contact_dry_run/2`,
+  `create_contact_subject/2`, `create_contact_authorized/2`) from
   `actions: [CreateContact, ...]`
 - Presence-based change detection: `Enact.provided?/2` and `Enact.updates/2`
 - `Enact.Resolve` — scalar and batch reference resolution with

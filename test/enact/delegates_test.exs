@@ -43,19 +43,30 @@ defmodule Enact.DelegatesTest do
 
     assert {:ok, %Enact.Preview{action: CreateXMLThing, updates: %{}}} =
              XMLContext.create_xml_thing_dry_run(%{}, @opts)
+
+    assert :ok = XMLContext.create_xml_thing_authorized(%{}, @opts)
   end
 
   test "aliases expand at the use site" do
     assert function_exported?(AliasedContext, :create_project, 2)
     assert function_exported?(AliasedContext, :create_project_dry_run, 2)
+    assert function_exported?(AliasedContext, :create_project_subject, 2)
+    assert function_exported?(AliasedContext, :create_project_authorized, 2)
   end
 
-  test "run and dry_run wrappers match calling the runner directly" do
+  test "run, dry_run, subject, and authorized wrappers match calling the runner directly" do
     assert AliasedContext.create_project(@valid, @opts) ==
              Enact.run(CreateProject, @valid, @opts)
 
     assert AliasedContext.create_project_dry_run(@valid, @opts) ==
              Enact.dry_run(CreateProject, @valid, @opts)
+
+    assert AliasedContext.create_project_authorized(%{}, @opts) ==
+             Enact.authorized(CreateProject, %{}, @opts)
+
+    assert_raise ArgumentError, ~r/Enact.authorized\/3/, fn ->
+      AliasedContext.create_project_subject(%{}, @opts)
+    end
 
     invalid = %{"name" => "", "slug" => "alpha"}
 

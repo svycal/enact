@@ -13,7 +13,7 @@ defmodule Enact.Action do
   or a single-purpose function over `(changeset | params, ctx)`. The runner
   (`Enact.run/3`) orchestrates them as:
 
-      load → cast → authorize → validate → resolve → execute → after_commit
+      load → authorize → cast → validate → resolve → execute → after_commit
 
   """
 
@@ -41,7 +41,7 @@ defmodule Enact.Action do
   returns `:no_subject` (leave `ctx.subject` nil). Returning `nil`
   produces `:not_found`. Must scope by the trust anchor (§9 of the
   design spec). Params are string-keyed — the runner stringifies atom
-  keys at the `run`/`dry_run` boundary — and values are uncast. Match
+  keys at the `run`/`dry_run`/`subject`/`authorized` boundary — and values are uncast. Match
   `%{"id" => id}`, not `params[:id]`.
   """
   @callback load_subject(params :: map(), ctx :: Context.t()) ::
@@ -49,8 +49,8 @@ defmodule Enact.Action do
 
   @doc """
   Authorizes the actor against the loaded context. Required — a forgotten
-  policy is indistinguishable from an open write. Runs before validate —
-  unauthorized callers learn nothing about what's invalid.
+  policy is indistinguishable from an open write. Runs before cast —
+  unauthorized callers trigger no input work.
 
   Return values:
 

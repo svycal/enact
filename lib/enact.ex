@@ -4,7 +4,7 @@ defmodule Enact do
 
   Enact standardizes the shape of every write:
 
-      load → cast → authorize → validate → resolve → execute → after_commit
+      load → authorize → cast → validate → resolve → execute → after_commit
 
   Actions implement `Enact.Action`; input casting and validation are plain
   Ecto via `Enact.InputSchema` modules; results are `{:ok, result}` or
@@ -50,8 +50,10 @@ defmodule Enact do
 
     * `[:enact, :action, :run]` / `[:enact, :action, :run, :error]`
     * `[:enact, :action, :dry_run]` / `[:enact, :action, :dry_run, :error]`
-      — distinct events so attempt-counting and audit trails never
-      conflate previews with real executions
+    * `[:enact, :action, :subject]` / `[:enact, :action, :subject, :error]`
+    * `[:enact, :action, :authorized]` / `[:enact, :action, :authorized, :error]`
+      — distinct events so form GETs, previews, and executions are
+      never conflated
 
   The run event fires after a successful commit but before
   `after_commit/2` runs, so a raising side effect cannot suppress the
@@ -101,7 +103,7 @@ defmodule Enact do
   end
 
   @doc """
-  Runs the side-effect-free front of the pipeline — cast, load, authorize,
+  Runs the side-effect-free front of the pipeline — load, authorize, cast,
   validate, resolve — then stops before any write, returning
   `{:ok, %Enact.Preview{}}` or the identical error surface to `run/3`.
 
@@ -140,6 +142,72 @@ defmodule Enact do
       end
 
     emit(result, :dry_run, action, ctx, start)
+    result
+  end
+
+  @doc """
+  Loads the action's subject and authorizes the actor. No body, no write.
+
+  Returns `{:ok, subject}` or `{:error, %Enact.Error{}}` (`:not_found`,
+  `:forbidden`). Does not cast, validate, or resolve. Pass locator params
+  (the path id), not the form body.
+
+  The action must load a subject. If `load_subject/2` returns
+  `:no_subject`, this raises `ArgumentError` — use `authorized/3` for a
+  new form.
+
+  Params keys are stringified exactly as in `run/3`.
+  """
+  @spec subject(module(), map(), keyword()) :: {:ok, struct()} | {:error, Error.t()}
+  def subject(action, params, opts) when is_atom(action) and is_map(params) and is_list(opts) do
+    Keyword.validate!(opts, [:actor, :repo, :assigns])
+    {config, ctx} = build(action, params, opts)
+    start = System.monotonic_time()
+
+    case load_and_authorize(action, config, ctx) do
+      {:ok, %Context{subject: nil}} ->
+        raise ArgumentError, """
+        #{inspect(action)} has no subject — load_subject/2 returned :no_subject. \
+        Enact.subject/3 returns the loaded record. Use Enact.authorized/3 when \
+        the action has no subject (a new form).
+        """
+
+      {:ok, ctx} ->
+        result = {:ok, ctx.subject}
+        emit(result, :subject, action, ctx, start)
+        result
+
+      {:error, _error} = error ->
+        emit(error, :subject, action, ctx, start)
+        error
+    end
+  end
+
+  @doc """
+  Authorizes the actor to perform the action. No body, no write.
+
+  Returns `:ok` or `{:error, %Enact.Error{}}` (`:forbidden`, or
+  `:not_found` when load fails). Does not return a record. For a new
+  form. For edit, archive, or create-under-parent, use `subject/3`.
+
+  Still runs `load_subject/2` so `authorize/1` sees `ctx.subject`.
+
+  Params keys are stringified exactly as in `run/3`.
+  """
+  @spec authorized(module(), map(), keyword()) :: :ok | {:error, Error.t()}
+  def authorized(action, params, opts)
+      when is_atom(action) and is_map(params) and is_list(opts) do
+    Keyword.validate!(opts, [:actor, :repo, :assigns])
+    {config, ctx} = build(action, params, opts)
+    start = System.monotonic_time()
+
+    result =
+      case load_and_authorize(action, config, ctx) do
+        {:ok, _ctx} -> :ok
+        {:error, _error} = error -> error
+      end
+
+    emit(result, :authorized, action, ctx, start)
     result
   end
 
@@ -347,7 +415,7 @@ defmodule Enact do
   defp dump_embed(items, related) when is_list(items), do: Enum.map(items, &dump(&1, related))
   defp dump_embed(item, related), do: dump(item, related)
 
-  ## Setup shared by run/3 and dry_run/3
+  ## Setup shared by run/3, dry_run/3, subject/3, and authorized/3
 
   defp build(action, params, opts) do
     actor = fetch_actor!(opts)
@@ -372,11 +440,17 @@ defmodule Enact do
     {config, ctx}
   end
 
-  defp pre_execute(action, config, ctx) do
+  defp load_and_authorize(action, config, ctx) do
     with :ok <- gate_anonymous(config, ctx.actor),
          {:ok, ctx} <- load_subject(action, config, ctx),
+         :ok <- authorize(action, ctx) do
+      {:ok, ctx}
+    end
+  end
+
+  defp pre_execute(action, config, ctx) do
+    with {:ok, ctx} <- load_and_authorize(action, config, ctx),
          changeset = cast(action, ctx),
-         :ok <- authorize(action, ctx),
          {:ok, changeset} <- validate(action, changeset, ctx) do
       Enact.Resolve.run(action.resolvers(), changeset, ctx)
     end
@@ -462,7 +536,7 @@ defmodule Enact do
     if Map.has_key?(acc, string_key) do
       raise ArgumentError, """
       params carry both #{inspect(String.to_existing_atom(string_key))} and \
-      #{inspect(string_key)} — keys are stringified at the run/dry_run \
+      #{inspect(string_key)} — keys are stringified at the runner \
       boundary, so the pair is ambiguous. Pass one or the other.
       """
     end
@@ -587,11 +661,15 @@ defmodule Enact do
 
   ## Telemetry
 
+  defp emit(:ok, kind, action, ctx, start), do: emit({:ok, :ok}, kind, action, ctx, start)
+
   defp emit({:ok, _result}, kind, action, ctx, start) do
     event =
       case kind do
         :run -> [:enact, :action, :run]
         :dry_run -> [:enact, :action, :dry_run]
+        :subject -> [:enact, :action, :subject]
+        :authorized -> [:enact, :action, :authorized]
       end
 
     :telemetry.execute(
@@ -606,6 +684,8 @@ defmodule Enact do
       case kind do
         :run -> [:enact, :action, :run, :error]
         :dry_run -> [:enact, :action, :dry_run, :error]
+        :subject -> [:enact, :action, :subject, :error]
+        :authorized -> [:enact, :action, :authorized, :error]
       end
 
     :telemetry.execute(

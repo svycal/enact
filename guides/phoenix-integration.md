@@ -14,7 +14,7 @@ config :enact, repo: MyApp.Repo
 
 ## Contexts
 
-Phoenix contexts remain the application API. Controllers, LiveViews, and jobs call context functions; those functions are one-liners that forward to `Enact.run/3` (or `dry_run/3`). The action module is the write; the context is the name the rest of the app uses.
+Phoenix contexts remain the application API. Controllers, LiveViews, and jobs call context functions; those functions are one-liners that forward to `Enact.run/3`, `dry_run/3`, `subject/3`, or `authorized/3`. The action module is the write; the context is the name the rest of the app uses.
 
 ```elixir
 # lib/my_app/projects.ex
@@ -28,11 +28,14 @@ defmodule MyApp.Projects do
   def create_project_dry_run(params, opts), do: Enact.dry_run(CreateProject, params, opts)
   def update_project_dry_run(params, opts), do: Enact.dry_run(UpdateProject, params, opts)
 
+  def create_project_authorized(params, opts), do: Enact.authorized(CreateProject, params, opts)
+  def update_project_subject(params, opts), do: Enact.subject(UpdateProject, params, opts)
+
   # reads and load_subject fetchers stay here
 end
 ```
 
-Keep those bodies as a single `Enact.run` / `Enact.dry_run` call. Do not reshape params, stamp persistable fields, or preload records into `assigns:` — that work belongs in the action (`execute/2`, `load_subject/2`, `resolvers/0`). `opts` pass through unchanged so `:actor`, `:repo`, `:assigns`, and `:confirm_digest` work as they do on `Enact.run/3`.
+Keep those bodies as a single `Enact.run` / `Enact.dry_run` / `Enact.subject` / `Enact.authorized` call. Do not reshape params, stamp persistable fields, or preload records into `assigns:` — that work belongs in the action (`execute/2`, `load_subject/2`, `resolvers/0`). `opts` pass through unchanged so `:actor`, `:repo`, `:assigns`, and `:confirm_digest` work as they do on `Enact.run/3`.
 
 The one-liners may be generated instead of written by hand:
 
@@ -46,7 +49,7 @@ defmodule MyApp.Projects do
 end
 ```
 
-Names come from the last segment of each action module (`CreateProject` → `create_project` / `create_project_dry_run`). Both wrappers are generated for every listed action. Handwritten delegates remain valid; the helper is opt-in.
+Names come from the last segment of each action module (`CreateProject` → `create_project` / `create_project_dry_run` / `create_project_subject` / `create_project_authorized`). All four wrappers are generated for every listed action. Handwritten delegates remain valid; the helper is opt-in.
 
 Action tests and IEx may still call `Enact.run/3` directly. That is the implementation API, not a second door for controllers.
 
@@ -112,9 +115,23 @@ defmodule MyAppWeb.ProjectController do
 
   alias MyApp.Projects
 
+  def new(conn, _params) do
+    with :ok <-
+           Projects.create_project_authorized(%{}, actor: conn.assigns.current_scope) do
+      render(conn, :new)
+    end
+  end
+
   def create(conn, params) do
     with {:ok, project} <- Projects.create_project(params, actor: conn.assigns.current_scope) do
       conn |> put_status(:created) |> render(:show, project: project)
+    end
+  end
+
+  def edit(conn, params) do
+    with {:ok, project} <-
+           Projects.update_project_subject(params, actor: conn.assigns.current_scope) do
+      render(conn, :edit, project: project)
     end
   end
 
@@ -351,14 +368,18 @@ The runner emits telemetry events for every action. Attach a handler for metrics
     [:enact, :action, :run],
     [:enact, :action, :run, :error],
     [:enact, :action, :dry_run],
-    [:enact, :action, :dry_run, :error]
+    [:enact, :action, :dry_run, :error],
+    [:enact, :action, :subject],
+    [:enact, :action, :subject, :error],
+    [:enact, :action, :authorized],
+    [:enact, :action, :authorized, :error]
   ],
   &MyApp.Audit.handle_enact_event/4,
   nil
 )
 ```
 
-Error events carry `type:` in metadata, so a handler can record entries such as "actor X attempted Y, denied :forbidden". Dry runs emit separate events, so previews are auditable without inflating execution counts.
+Error events carry `type:` in metadata, so a handler can record entries such as "actor X attempted Y, denied :forbidden". Dry runs, subject loads, and authorized checks emit separate events, so previews and form GETs are auditable without inflating execution counts.
 
 ## Confirmation flows (agent surfaces, MCP tools)
 

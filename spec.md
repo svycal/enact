@@ -4,7 +4,7 @@ A thin, behaviour-based action layer for application write operations, published
 
 ## 1. Purpose and philosophy
 
-Enact standardizes the shape of every write operation: load → cast → authorize → validate → resolve → execute → after-commit. It is **Plug for writes** — the value is the uniform pipeline shape, the actor context, and the error taxonomy, not any novel validation or persistence machinery.
+Enact standardizes the shape of every write operation: load → authorize → cast → validate → resolve → execute → after-commit. It is **Plug for writes** — the value is the uniform pipeline shape, the actor context, and the error taxonomy, not any novel validation or persistence machinery.
 
 **Enact orchestrates; Ecto does the work.** Validation is Ecto changesets. Input casting is Ecto embedded schemas. Persistence is the host application's existing Ecto schemas and changesets. Enact adds no parallel type system, no validation vocabulary, and no DSL.
 
@@ -16,7 +16,7 @@ Target size: roughly 300–350 lines total (runner, Context, Error, Preview, Res
 - **No custom changeset or validation library.** `Ecto.Changeset` is the one and only changeset. `Enact.Validations` contains a small number of helpers that _compose into_ Ecto pipelines, never replacements for `validate_*` functions.
 - **No third-party validation dependency** (Peri, Drops, etc.). Revisit only if a census of real actions shows nested input is pervasive enough that per-shape input modules become a tax paid everywhere.
 - **No OpenAPI generation from input schemas, and no knowledge of any API-documentation library** (OpenApiSpex included). The package exposes introspection manifests (`fields/1`, `resolvers/0`); host apps hand-write their doc schemas (the public contract should change only by deliberate act) and prevent drift with a host-side reconciliation test against those manifests (§10), not codegen.
-- **No raising variant (`run!`)**, no Ash-style `define :create_project` code interface, no imperative `resolve/2` escape hatch. Context one-liners stay `(params, opts) → Enact.run/3 | dry_run/3`; hosts may write them by hand or generate them with `use Enact.Delegates`.
+- **No raising variant (`run!`)**, no Ash-style `define :create_project` code interface, no imperative `resolve/2` escape hatch. Context one-liners stay `(params, opts) → Enact.run/3 | dry_run/3 | subject/3 | authorized/3`; hosts may write them by hand or generate them with `use Enact.Delegates`.
 
 ## 2. Public API
 
@@ -41,16 +41,26 @@ Enact.run(ActionModule, params,
 # same options as run/3, minus confirm_digest
 Enact.dry_run(ActionModule, params, actor: actor)
 # Returns: {:ok, %Enact.Preview{}} | {:error, %Enact.Error{}}   — see §12
+
+# load + authorize; no body, no write. Locator params only.
+Enact.subject(ActionModule, params, actor: actor)
+# Returns: {:ok, subject} | {:error, %Enact.Error{}}
+# no subject → ArgumentError; use authorized/3
+
+Enact.authorized(ActionModule, params, actor: actor)
+# Returns: :ok | {:error, %Enact.Error{}}
 ```
 
 - The actor is always an explicit, required option. No ambient/process-dictionary context. Every write path is greppable via `Enact.run` (or `use Enact.Delegates` at a context that forwards to it) and must answer "as whom?" — actorless writes are unrepresentable by construction (valuable for audit/compliance posture).
 - **`actor: nil` always raises `ArgumentError`** (message points at anonymous actors, §2.4): nil is indistinguishable from a forgotten actor — anonymity must be a pattern-matchable value, never an absence. The deliberate collision with Phoenix's `current_scope: nil` forces public-endpoint callers to construct an explicit anonymous actor at the boundary.
 - The actor is **opaque to Enact** — only the host app's `authorize/1` and fetchers read it. Any term works, with no Phoenix dependency; in Phoenix 1.8+ apps the recommended actor is the scope struct (`actor: conn.assigns.current_scope`), whose role Enact actions naturally inherit.
-- `run/3` and `dry_run/3` accept an optional `assigns: %{}` passthrough merged into `ctx.assigns` — the documented channel for request metadata (IP, session id) that isn't part of the actor. Resolver-stashed keys are merged after and win on collision. Persistable field values belong in params (what this invocation said) or are stamped in `execute/2` from `ctx`; the passthrough is not a second input channel.
+- `run/3`, `dry_run/3`, `subject/3`, and `authorized/3` accept an optional `assigns: %{}` passthrough merged into `ctx.assigns` — the documented channel for request metadata (IP, session id) that isn't part of the actor. Resolver-stashed keys are merged after and win on collision. Persistable field values belong in params (what this invocation said) or are stamped in `execute/2` from `ctx`; the passthrough is not a second input channel.
+- **`subject/3`** is load + authorize and returns `{:ok, subject}` or `:not_found` / `:forbidden`. The action must have a subject; `:no_subject` raises `ArgumentError` (use `authorized/3`). Pass locator params, not the form body. Do not return `%Enact.Context{}`.
+- **`authorized/3`** is the same prefix and returns `:ok` or `:not_found` / `:forbidden`. For a new form. Still runs `load_subject/2` so `authorize/1` sees `ctx.subject`.
 - Callers never choose the mode; mode is the action's identity via `config/0`.
 - Same calling convention from controllers, background jobs, tests, IEx. No internal-bypass path.
-- Application callers typically go through a context function (`Projects.create_project(params, opts)`). Those functions are one-liners that forward to `run/3` / `dry_run/3`. Hosts may write them by hand or generate them with `use Enact.Delegates, actions: [CreateProject, ...]` (names from the last module segment, underscored). The action module remains the write; the helper is opt-in sugar, not a second API.
-- **Params keys are stringified at the `run`/`dry_run` boundary** (Oban-shaped: atoms at the call site, Plug/JSON strings inside). Values are untouched. Nested plain maps and lists of maps are walked; structs are values and are not walked. Both `:id` and `"id"` at the same level raises — the pair is ambiguous. Inside `load_subject/2` and `ctx.params`, match `%{"id" => id}`, never `params[:id]`.
+- Application callers typically go through a context function (`Projects.create_project(params, opts)`). Those functions are one-liners that forward to `run/3` / `dry_run/3` / `subject/3` / `authorized/3`. Hosts may write them by hand or generate them with `use Enact.Delegates, actions: [CreateProject, ...]` (names from the last module segment, underscored). The action module remains the write; the helper is opt-in sugar, not a second API.
+- **Params keys are stringified at the `run`/`dry_run`/`subject`/`authorized` boundary** (Oban-shaped: atoms at the call site, Plug/JSON strings inside). Values are untouched. Nested plain maps and lists of maps are walked; structs are values and are not walked. Both `:id` and `"id"` at the same level raises — the pair is ambiguous. Inside `load_subject/2` and `ctx.params`, match `%{"id" => id}`, never `params[:id]`.
 
 ### 2.2 The behaviour
 
@@ -67,7 +77,7 @@ Every callback is either **pure data** or **a single-purpose function over (chan
 | `execute/2`      | yes                   | function | Persist; `(changeset, ctx) → {:ok, term} \| {:error, term}`; runs in transaction                                                                                                                          |
 | `after_commit/2` | no (default `:ok`)    | function | Post-commit side effects (job insertion, analytics); never rolls back                                                                                                                                     |
 
-`use Enact.Action` sets `@behaviour Enact.Action` and `defoverridable` defaults for the optional callbacks (`config/0`, `load_subject/2`, `validate/2`, `resolvers/0`, `after_commit/2`). That is its entire body. `input/0`, `authorize/1`, and `execute/2` have no defaults — a missing `authorize/1` is a compile warning and a teaching `ArgumentError` at `run`/`dry_run`.
+`use Enact.Action` sets `@behaviour Enact.Action` and `defoverridable` defaults for the optional callbacks (`config/0`, `load_subject/2`, `validate/2`, `resolvers/0`, `after_commit/2`). That is its entire body. `input/0`, `authorize/1`, and `execute/2` have no defaults — a missing `authorize/1` is a compile warning and a teaching `ArgumentError` at `run`/`dry_run`/`subject`/`authorized`.
 
 ### 2.3 Context
 
@@ -93,21 +103,21 @@ Some actions must accept unauthenticated callers (e.g. a public visitor creating
 
 - **Anonymity is a declared property of the action**: `config/0` returns `anonymous?: true`. The security-review question "which write paths accept unauthenticated callers?" is answered by grepping for it — a closed, auditable list. An authenticated actor may still call an anonymous-capable action (`anonymous?` is a floor, not a partition).
 - **The `Enact.Actor` protocol** answers `anonymous?/1` for any actor term: `@fallback_to_any` returns `false`; a built-in impl makes the bare `:anonymous` atom anonymous (zero-ceremony option for simple apps); host apps add a small impl for their scope struct (`%Scope{user: nil} → true`), enabling rich anonymous scopes carrying session id / IP for rate limiting — the idiomatic Phoenix 1.8 shape.
-- **Runner enforcement**: `actor: nil` raises (always, §2.1). `Enact.Actor.anonymous?(actor)` true → permitted only when the action declares `anonymous?: true`, otherwise `{:error, %Enact.Error{type: :forbidden}}` before any pipeline work. Applies identically to `dry_run/3`.
+- **Runner enforcement**: `actor: nil` raises (always, §2.1). `Enact.Actor.anonymous?(actor)` true → permitted only when the action declares `anonymous?: true`, otherwise `{:error, %Enact.Error{type: :forbidden}}` before any pipeline work. Applies identically to `dry_run/3`, `subject/3`, and `authorized/3`.
 - **Tenancy anchoring without an actor**: convention #1 (§9) generalizes — every load and fetcher scopes by a _trust anchor_: the actor when authenticated, a public-by-construction subject when anonymous (e.g. `load_subject/2` fetches the resource by public slug + visibility flag, and all fetchers scope through `ctx.subject`'s tenant, not the actor). Anonymous endpoints are the prime ID-enumeration surface; §7's "not found ≡ not yours" property does real work here.
 - **Audit/telemetry**: events record the anonymous actor affirmatively ("an unauthenticated party did X"), never a null field.
 
 ## 3. Pipeline
 
-**Full pipeline:** `load → cast → authorize → validate → resolve → execute → after_commit`
+**Full pipeline:** `load → authorize → cast → validate → resolve → execute → after_commit`
 
-The load step always runs first, in either mode (rationale in invariant 3). The default `load_subject/2` returns `:no_subject` and leaves `ctx.subject` nil; override it to fetch a subject.
+The load step always runs first, in either mode (rationale in invariant 3). The default `load_subject/2` returns `:no_subject` and leaves `ctx.subject` nil; override it to fetch a subject. `authorize/1` takes only `ctx` (not the changeset), so it runs before cast. `subject/3` and `authorized/3` are that prefix: `load → authorize`.
 
 Ordering invariants (structural, not conventional):
 
-1. **Authorize before validate** — unauthorized callers learn nothing about what's invalid.
+1. **Authorize before cast** — unauthorized callers trigger no input work.
 2. **Validate before resolve** — cheap gates expensive; garbage input never triggers reference loads.
-3. **Load before cast** — in patch mode the subject supplies the validation base via `from_subject/1` (§5.3); in create mode load-first is harmless and keeps the pipeline uniform.
+3. **Load before authorize and cast** — `authorize/1` reads `ctx.subject`; in patch mode the subject also supplies the validation base via `from_subject/1` (§5.3).
 4. **Execute inside `repo.transaction/1`**; `{:error, reason}` from execute rolls back. `after_commit` runs strictly after successful commit, outside the transaction.
 
 Runner error normalization:
@@ -120,7 +130,7 @@ Runner error normalization:
 - A `%Ecto.Changeset{}` error from `repo.insert/update` (declared constraints) → promoted to `:invalid`, not `:internal`.
 - Any other execute failure → `:internal` (see §8 discipline).
 
-**Where record-fetching lives:** URL-anchored records → `load_subject/2` (the subject); body-referenced records → `resolvers/0` (§7). Do **not** pass pre-loaded domain records via the `assigns:` passthrough: an externally-loaded record escapes trust-anchor enforcement, breaks `run`/`dry_run` parity for callers with no controller (jobs, MCP), and makes provenance unauditable. Actions are self-contained — the extra query is the price, and it's cheap.
+**Where record-fetching lives:** URL-anchored records → `load_subject/2` (the subject); body-referenced records → `resolvers/0` (§7). Do **not** pass pre-loaded domain records via the `assigns:` passthrough: an externally-loaded record escapes trust-anchor enforcement, breaks `run`/`dry_run`/`subject`/`authorized` parity for callers with no controller (jobs, MCP), and makes provenance unauditable. Actions are self-contained — the extra query is the price, and it's cheap.
 
 ## 4. Input schemas
 
@@ -405,7 +415,12 @@ defstruct [:type, :changeset, :reason, meta: %{}]
 - **`:conflict`** for optimistic/temporal races (resource claimed between validation and insert, stale_error_field). Input was fine; the world changed.
 - **404/403 collapse** is renderer policy (defense in depth; tenant-scoped `load_subject/2` mostly produces `:not_found` for cross-tenant probes anyway). Internally keep both types — different bugs.
 - **`:internal` is a bug bucket.** Every production occurrence is either a bug or a missing promotion to a real type. Runner auto-promotes constraint-error changesets from repo failures to `:invalid`.
-- **Telemetry:** the runner emits `[:enact, :action, :run]` / `[:enact, :action, :run, :error]` — per-action, per-type metrics for observability tooling and audit trails ("actor X attempted Y, denied :forbidden") with zero action-author involvement. The run event fires after a successful commit but before `after_commit/2`, so a raising side effect cannot suppress the audit record of a committed write. Dry runs emit distinct events (`[:enact, :action, :dry_run]` and `[:enact, :action, :dry_run, :error]`) so attempt-counting and audit trails never conflate previews with real executions — a dry run is still an authorization-relevant event and should be auditable as one.
+- **Telemetry:** the runner emits, per-action, per-type, with zero action-author involvement:
+  - `[:enact, :action, :run]` / `[:enact, :action, :run, :error]` — the run event fires after a successful commit but before `after_commit/2`, so a raising side effect cannot suppress the audit record of a committed write
+  - `[:enact, :action, :dry_run]` / `[:enact, :action, :dry_run, :error]`
+  - `[:enact, :action, :subject]` / `[:enact, :action, :subject, :error]`
+  - `[:enact, :action, :authorized]` / `[:enact, :action, :authorized, :error]`
+  Error events carry `type:` (`Enact.Error` type). Distinct events so form GETs, previews, and executions are never conflated. A dry run or subject/authorized check is still an authorization-relevant event and should be auditable as one.
 - `meta` for machine-readable extras (retry_after, stable error codes) only.
 
 ## 9. Guardrails — `Enact.Guardrails`
@@ -445,7 +460,7 @@ Invocation: memoized first-`run` check, **plus** a CI test that calls it on ever
 
 | Module              | Contents                                                                                                                          | ~Lines |
 | ------------------- | --------------------------------------------------------------------------------------------------------------------------------- | ------ |
-| `Enact`             | `run/3`, `dry_run/3`, pipeline steps, `updates/2`, path-capable `provided?/2`, `merged/4`, digest, transaction/error normalization, telemetry | 120    |
+| `Enact`             | `run/3`, `dry_run/3`, `subject/3`, `authorized/3`, pipeline steps, `updates/2`, path-capable `provided?/2`, `merged/4`, digest, transaction/error normalization, telemetry | 120    |
 | `Enact.Action`      | behaviour + `__using__` defaults                                                                                                  | 40     |
 | `Enact.Context`     | struct                                                                                                                            | 15     |
 | `Enact.Actor`       | protocol: `anonymous?/1` + Any/Atom impls                                                                                         | 15     |
@@ -456,13 +471,13 @@ Invocation: memoized first-`run` check, **plus** a CI test that calls it on ever
 | `Enact.Validations` | changeset-pipeline combinators: `check/2`, `unique/3`                                                                             | 30     |
 | `Enact.Guardrails`  | recursive input-schema assertions                                                                                                 | 40     |
 | `Enact.Test`        | `assert_invalid/2`, `assert_rejects_empty_strings/3`, ctx builder, shared test support                                            | 60     |
-| `Enact.Delegates`   | opt-in `use` that generates context `run` / `dry_run` one-liners from action modules                                             | 40     |
+| `Enact.Delegates`   | opt-in `use` that generates context `run` / `dry_run` / `subject` / `authorized` one-liners from action modules                  | 40     |
 
 Packaging: ships as a Hex package from the start, so it can be shared across multiple host applications.
 
 - Dependencies: `ecto` (core only — no `ecto_sql` requirement; changesets ship without database machinery). `telemetry` for the runner events. Nothing else.
 - The repo is injected per call (`repo:` option) or set via host-app config (`config :enact, repo: MyApp.Repo`) — the package itself never owns a repo.
-- Versioning: start at `0.x` and treat the behaviours (`Enact.Action`, `Enact.InputSchema`), the `Enact.Actor` protocol, the `Enact.Error` and `Enact.Preview` shapes, and the `Enact` module functions (`run/3`, `dry_run/3`, `updates/2`, `provided?/2`) as the compatibility surface across consuming apps. Because multiple codebases consume it, breaking changes to callback signatures or the error taxonomy are the expensive kind — batch them.
+- Versioning: start at `0.x` and treat the behaviours (`Enact.Action`, `Enact.InputSchema`), the `Enact.Actor` protocol, the `Enact.Error` and `Enact.Preview` shapes, and the `Enact` module functions (`run/3`, `dry_run/3`, `subject/3`, `authorized/3`, `updates/2`, `provided?/2`) as the compatibility surface across consuming apps. Because multiple codebases consume it, breaking changes to callback signatures or the error taxonomy are the expensive kind — batch them.
 - No host-app assumptions: no auth coupling (fetchers own authorization), no HTTP/Phoenix dependency (the ErrorRenderer lives in the host; scope structs work as actors via opacity + `Enact.Actor`), no JSON library, no API-documentation tooling (§10).
 - The §10 tests split accordingly: pipeline/guardrail/resolve mechanics are package tests; reconciliation, cross-tenant sweeps, and the PATCH/create matrices are host-app tests (they depend on real actions and schemas). Ship the `assert_invalid` helper and any test support in an `Enact.Test` module so host apps don't reinvent it.
 
@@ -470,7 +485,7 @@ Packaging: ships as a Hex package from the start, so it can be shared across mul
 
 Motivation: agent-facing surfaces (e.g. MCP tools with a confirmation step) need to take user input, validate it fully, and reflect the casted/normalized changes back for confirmation before anything persists.
 
-The pipeline is already staged for this: every step before `execute` is side-effect free (validate/resolve perform DB reads only; the transaction opens at persist). `dry_run/3` runs `load → cast → authorize → validate → resolve`, then stops.
+The pipeline is already staged for this: every step before `execute` is side-effect free (validate/resolve perform DB reads only; the transaction opens at persist). `dry_run/3` runs `load → authorize → cast → validate → resolve`, then stops.
 
 ```elixir
 Enact.dry_run(ActionModule, params, actor: actor)

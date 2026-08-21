@@ -1,16 +1,18 @@
 # Enact usage rules
 
-Rules for writing application code in a project that uses Enact. Enact standardizes every write operation as an action module run through `load → cast → authorize → validate → resolve → execute → after_commit`. Enact orchestrates; Ecto does the work — there is no DSL and no custom validation vocabulary.
+Rules for writing application code in a project that uses Enact. Enact standardizes every write operation as an action module run through `load → authorize → cast → validate → resolve → execute → after_commit`. Enact orchestrates; Ecto does the work — there is no DSL and no custom validation vocabulary.
 
 ## Calling actions
 
-- Every write goes through an action via `Enact.run/3`. Never write via `Repo.insert/update/delete`. Application callers (controllers, LiveViews, jobs) typically go through a context one-liner that only forwards to `Enact.run/3` / `dry_run/3` — see the Phoenix guide. Those one-liners may be handwritten or generated with `use Enact.Delegates, actions: [CreateProject, ...]`. Action tests and IEx may call `Enact.run/3` directly.
+- Every write goes through an action via `Enact.run/3`. Never write via `Repo.insert/update/delete`. Application callers (controllers, LiveViews, jobs) typically go through a context one-liner that only forwards to `Enact.run/3` / `dry_run/3` / `subject/3` / `authorized/3` — see the Phoenix guide. Those one-liners may be handwritten or generated with `use Enact.Delegates, actions: [CreateProject, ...]`. Action tests and IEx may call `Enact.run/3` directly.
 - Callers may pass atom- or string-keyed maps. The runner stringifies keys before any callback runs, so `load_subject/2` and `ctx.params` always see strings. Match `%{"id" => id}`, never `params[:id]`. Values are not rewritten.
 - Params are the invocation payload, not "what a human typed." Jobs and `:system` are callers. A value this run is *saying* — something that will be persisted and previewed — belongs in params on an action whose `authorize/1` allows that caller.
 - `actor:` is required and `actor: nil` raises. For unauthenticated callers pass an explicit anonymous actor (`:anonymous`, or a scope struct whose `Enact.Actor` impl returns `true`), and only against actions declaring `anonymous?: true` in `config/0`.
 - Pass request metadata (IP, session id) via `assigns: %{}`. **Never** pass pre-loaded domain records or persistable fields through `assigns:` — records are fetched by `load_subject/2` / `resolvers/0`; persistable fields smuggled here skip cast, `updates/2`, preview, and the digest. Actions are self-contained; the extra query is the price.
 - The same calling convention applies from controllers, background jobs, tests, and IEx. There is no internal-bypass path.
 - For confirmation flows: the context's `*_dry_run` one-liner (or `Enact.dry_run/3`) returns an `%Enact.Preview{}`; pass `preview.digest` back as `confirm_digest:`. A mismatch returns `:conflict`. Compare `preview.updates` against `preview.subject` for old → new diffs. Resolved structs stay out of the preview (`resolved` is names only).
+- For the GET that needs the action's record (edit, archive confirmation, create-under-parent): `Enact.subject/3` (or `*_subject`). Pass locator params only. Returns `{:ok, subject}` or `:not_found` / `:forbidden`. An action with no subject raises — use `authorized/3`.
+- For a new form: `Enact.authorized/3` (or `*_authorized`). Returns `:ok` or `:forbidden` / `:not_found`. Does not return a record.
 
 ## Organizing modules
 

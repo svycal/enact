@@ -76,11 +76,30 @@ defmodule EnactTest do
     def execute(changeset, ctx), do: {:ok, {Enact.updates(changeset, ctx), ctx.subject}}
   end
 
+  defmodule ForbiddenInput do
+    use Ecto.Schema
+    use Enact.InputSchema
+
+    @primary_key false
+    embedded_schema do
+      field :name, :string
+    end
+
+    @impl Enact.InputSchema
+    def changeset(base, params, _mode) do
+      send(self(), :cast_called)
+      Enact.InputSchema.cast_input(base, params, [:name])
+    end
+
+    @impl Enact.InputSchema
+    def fields(_mode), do: [:name]
+  end
+
   defmodule ForbiddenAction do
     use Enact.Action
 
     @impl Enact.Action
-    def input, do: EnactTest.ProjectInput
+    def input, do: ForbiddenInput
 
     @impl Enact.Action
     def authorize(_ctx), do: false
@@ -422,10 +441,11 @@ defmodule EnactTest do
   ## Authorize
 
   describe "authorize" do
-    test "false produces :forbidden and runs before validate" do
-      result = run(ForbiddenAction, %{"priority" => -5})
+    test "false produces :forbidden and runs before cast" do
+      result = run(ForbiddenAction, %{"name" => "x"})
 
       assert {:error, %Error{type: :forbidden, changeset: nil}} = result
+      refute_received :cast_called
       refute_received :validate_called
     end
 

@@ -2,7 +2,8 @@ defmodule Enact.Error do
   @moduledoc """
   The closed error taxonomy for action results.
 
-  Every failed `Enact.run/3` or `Enact.dry_run/3` returns
+  Every failed `Enact.run/3`, `Enact.dry_run/3`, `Enact.subject/3`, or
+  `Enact.authorized/3` returns
   `{:error, %Enact.Error{}}` with one of five types, each mapping to an
   HTTP status:
 

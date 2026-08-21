@@ -1,7 +1,7 @@
 defmodule Enact.Delegates do
   @moduledoc """
-  Opt-in helper that generates context one-liners for `Enact.run/3` and
-  `Enact.dry_run/3`.
+  Opt-in helper that generates context one-liners for `Enact.run/3`,
+  `Enact.dry_run/3`, `Enact.subject/3`, and `Enact.authorized/3`.
 
   Phoenix contexts remain the application API; this only writes the
   forwarding functions hosts otherwise type by hand. It is not an
@@ -24,10 +24,16 @@ defmodule Enact.Delegates do
       def create_contact_dry_run(params, opts),
         do: Enact.dry_run(CreateContact, params, opts)
 
+      def create_contact_subject(params, opts),
+        do: Enact.subject(CreateContact, params, opts)
+
+      def create_contact_authorized(params, opts),
+        do: Enact.authorized(CreateContact, params, opts)
+
   Names come from the last segment of the module, underscored via
-  `Macro.underscore/1`. Both the run and dry-run wrappers are generated
-  for every listed action. Bodies only forward — no param reshaping, no
-  persistable fields stamped in.
+  `Macro.underscore/1`. All four wrappers are generated for every listed
+  action. Bodies only forward — no param reshaping, no persistable fields
+  stamped in.
 
   If a host wants a different public name or a non-forwarding body, omit
   that module from the list and write the function by hand.
@@ -117,8 +123,12 @@ defmodule Enact.Delegates do
   defp delegate_defs(action) do
     name = function_name!(action)
     dry_name = :"#{name}_dry_run"
+    subject_name = :"#{name}_subject"
+    authorized_name = :"#{name}_authorized"
     run_doc = "Delegates to `Enact.run/3` with `#{inspect(action)}`."
     dry_doc = "Delegates to `Enact.dry_run/3` with `#{inspect(action)}`."
+    subject_doc = "Delegates to `Enact.subject/3` with `#{inspect(action)}`."
+    authorized_doc = "Delegates to `Enact.authorized/3` with `#{inspect(action)}`."
 
     quote do
       @doc unquote(run_doc)
@@ -129,6 +139,16 @@ defmodule Enact.Delegates do
       @spec unquote(dry_name)(map(), keyword()) ::
               {:ok, Enact.Preview.t()} | {:error, Enact.Error.t()}
       def unquote(dry_name)(params, opts), do: Enact.dry_run(unquote(action), params, opts)
+
+      @doc unquote(subject_doc)
+      @spec unquote(subject_name)(map(), keyword()) ::
+              {:ok, struct()} | {:error, Enact.Error.t()}
+      def unquote(subject_name)(params, opts), do: Enact.subject(unquote(action), params, opts)
+
+      @doc unquote(authorized_doc)
+      @spec unquote(authorized_name)(map(), keyword()) :: :ok | {:error, Enact.Error.t()}
+      def unquote(authorized_name)(params, opts),
+        do: Enact.authorized(unquote(action), params, opts)
     end
   end
 
