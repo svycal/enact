@@ -5,6 +5,8 @@
 - `Enact.Guardrails` allows the structural `[]` default on parameterized
   array fields (`{:array, {:parameterized, _}}`), matching `embeds_many`.
   Primitive array defaults (`{:array, :string}` and similar) still raise.
+- Removed `Enact.Test.assert_rejects_empty_strings/3`. Empty-string
+  strictness is a `cast_input/4` convention, not a mechanical check.
 
 ## 0.1.0 (2026-08-21)
 

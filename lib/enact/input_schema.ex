@@ -178,9 +178,6 @@ defmodule Enact.InputSchema do
 
   Required-ness, defaults, and null-rejection are out of scope; they stay
   in changeset heads, DB columns, and action `validate/2` respectively.
-  `Enact.Test.assert_rejects_empty_strings/3` verifies the empty-string
-  outcome regardless of whether a module uses `cast_input/4` or a stock
-  `cast` with `empty_values: []`.
   """
   @spec cast_input(struct() | Ecto.Changeset.t(), map(), [atom()], keyword()) ::
           Ecto.Changeset.t()

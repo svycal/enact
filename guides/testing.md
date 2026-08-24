@@ -1,6 +1,6 @@
 # Testing Host Applications
 
-Enact's own suite covers the pipeline mechanics. Write these tests in the host application; they depend on your actions, schemas, and tenancy model. Import only the helpers you need — `import Enact.Test, only: [assert_invalid: 2, assert_rejects_empty_strings: 2, build_ctx: 1]`. Phoenix `DataCase` already defines `errors_on/1`; use that, or call `Enact.Test.errors_on/1` if the host has no helper. A blanket `import Enact.Test` will collide on `errors_on/1`.
+Enact's own suite covers the pipeline mechanics. Write these tests in the host application; they depend on your actions, schemas, and tenancy model. Import only the helpers you need — `import Enact.Test, only: [assert_invalid: 2, build_ctx: 1]`. Phoenix `DataCase` already defines `errors_on/1`; use that, or call `Enact.Test.errors_on/1` if the host has no helper. A blanket `import Enact.Test` will collide on `errors_on/1`.
 
 ## The action registry
 
@@ -274,18 +274,3 @@ test "empty-string-at-rest fields survive input casting" do
   end
 end
 ```
-
-## 9. Empty-string strictness
-
-Ecto's default cast silently coerces `""` to `nil` on every field type. On non-string fields that turns malformed input into a null-clear instruction instead of a cast error. `Enact.Test.assert_rejects_empty_strings/3` probes each non-string castable field with `""` and fails unless the module reports a cast error:
-
-```elixir
-test "non-string fields reject empty strings" do
-  for action <- MyApp.Actions.all(), input = action.input(), input != nil do
-    mode = Keyword.get(action.config(), :mode, :create)
-    assert_rejects_empty_strings(input, mode)
-  end
-end
-```
-
-The probe checks behavior, not mechanism: it passes for modules using `Enact.InputSchema.cast_input/4` and for modules using stock `cast` with `empty_values: []`. Pass `except:` for fields whose custom types accept `""` deliberately.
