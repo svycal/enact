@@ -25,6 +25,46 @@ defmodule Enact.GuardrailsTest do
     end
   end
 
+  defmodule FakeEmbedType do
+    use Ecto.ParameterizedType
+
+    def init(opts), do: Map.new(opts)
+    def type(_params), do: :map
+    def cast(value, _params), do: {:ok, value}
+    def load(value, _loader, _params), do: {:ok, value}
+    def dump(value, _dumper, _params), do: {:ok, value}
+  end
+
+  defmodule ParameterizedArrayDefault do
+    use Ecto.Schema
+
+    @primary_key false
+    embedded_schema do
+      field :blocks, {:array, FakeEmbedType}, default: []
+    end
+
+    def changeset(base, params, _mode), do: Ecto.Changeset.cast(base, params, [:blocks])
+    def fields(_mode), do: [:blocks]
+  end
+
+  defmodule PrimitiveArrayDefault do
+    use Ecto.Schema
+
+    @primary_key false
+    embedded_schema do
+      field :tags, {:array, :string}, default: []
+    end
+  end
+
+  defmodule ParameterizedOneDefault do
+    use Ecto.Schema
+
+    @primary_key false
+    embedded_schema do
+      field :block, FakeEmbedType, default: %{}
+    end
+  end
+
   defmodule WithPK do
     use Ecto.Schema
 
@@ -107,6 +147,22 @@ defmodule Enact.GuardrailsTest do
     test "a falsy default raises (default: false is still a default)" do
       assert_raise ArgumentError, ~r/declares a default for field :flag/, fn ->
         assert_valid_input_schema!(FalseDefault)
+      end
+    end
+
+    test "a parameterized array default of [] is allowed" do
+      assert assert_valid_input_schema!(ParameterizedArrayDefault, mode: :create) == :ok
+    end
+
+    test "a primitive array default of [] raises" do
+      assert_raise ArgumentError, ~r/declares a default for field :tags/, fn ->
+        assert_valid_input_schema!(PrimitiveArrayDefault)
+      end
+    end
+
+    test "a non-nil default on a parameterized one field raises" do
+      assert_raise ArgumentError, ~r/declares a default for field :block/, fn ->
+        assert_valid_input_schema!(ParameterizedOneDefault)
       end
     end
 

@@ -266,7 +266,7 @@ end
 
 ### 4.3 Input schema invariants (mechanically enforced — see §9)
 
-1. **No `default:` on any field.** Omitted fields are excluded from extraction by presence (§5.2), so a schema default never persists — it would only mislead validations into seeing a value the write will not contain. Defaults live in exactly one place: the DB column (preferred) or persistence schema. The host app's API docs document them; the database applies them.
+1. **No `default:` on scalar fields.** Embed fields and parameterized array fields (`{:array, {:parameterized, _}}`) are excluded — their structural `[]`/`nil` defaults match `embeds_many`. Omitted fields are excluded from extraction by presence (§5.2), so a schema default never persists — it would only mislead validations into seeing a value the write will not contain. Defaults live in exactly one place: the DB column (preferred) or persistence schema. The host app's API docs document them; the database applies them.
 2. **`@primary_key false`, recursively.** Item IDs cause `cast_embed` to switch to diff-by-id semantics, silently breaking replace-wholesale PATCH arrays.
 3. **No associations** (`has_many`/`belongs_to`) — embeds only. An association in an input module means the input/persistence boundary is being blurred.
 
@@ -429,7 +429,7 @@ Principle: **every "just don't do X" rule that is mechanically detectable gets d
 
 `assert_valid_input_schema!/1` walks an input module **recursively** (via `__schema__(:embeds)` / `__schema__(:embed, name).related`, with a cycle guard for self-referential embeds) and raises with teaching error messages on:
 
-1. Any scalar field with a non-nil default in `struct(module)` (embed fields excluded — their structural `[]`/`nil` defaults are fine).
+1. Any scalar field with a non-nil default in `struct(module)` (embed fields and parameterized array fields (`{:array, {:parameterized, _}}`) excluded — their structural `[]`/`nil` defaults are the same as `embeds_many`). Primitive arrays (`{:array, :string}` and similar) still raise: omitted vs `[]` is distinguishable there.
 2. `__schema__(:primary_key) != []` at any level (the nested-item level is where IDs sneak in).
 3. `__schema__(:associations) != []` — embeds only.
 4. **Top-level modules only:** missing `changeset/3` or `fields/1` exports, or missing `from_subject/1` on a module referenced by any patch-mode action (the `Enact.InputSchema` contract, §4.1/§5.3) — teaching errors pointing at the behaviour docs. Nested item modules are exempt (they implement `changeset/2` for `cast_embed`; §4.1 asymmetry note).
@@ -442,6 +442,7 @@ Invocation: memoized first-`run` check, **plus** a CI test that calls it on ever
 2. Fetchers check the trust anchor first and emit precise error messages only about records the anchor-scoped query returned (§7).
 3. Writes go through `Enact.run` — no direct-Repo context functions (social + optional Credo rule).
 4. Optional scalar columns are nullable with no default — `NULL` is the single representation of empty, aligning storage, `ctx.subject`, JSON `null`, and stock cast coalescing (the sibling of §4.3's "defaults live in the DB"). `NOT NULL DEFAULT ''` columns force `""` into the input domain and require per-field `""`-preserving casts; reserve them for fields where empty-string is genuinely distinct from absent.
+5. Parameterized-array item modules are not in `__schema__(:embeds)`, so the recursive walk does not visit them. Keep `@primary_key false` and no scalar defaults on those modules.
 
 ## 10. Required tests (part of the definition of done)
 

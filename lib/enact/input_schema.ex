@@ -52,7 +52,10 @@ defmodule Enact.InputSchema do
   Omitted fields are excluded from extraction by presence, so a schema
   default never persists — it would only mislead validations into seeing a
   value the write will not contain. Defaults live in the DB column (or
-  persistence schema); `Enact.Guardrails` enforces this.
+  persistence schema); `Enact.Guardrails` enforces this. Embed fields and
+  parameterized array fields (`{:array, {:parameterized, _}}`) keep their
+  structural `[]`/`nil` defaults; those match `embeds_many` and are not
+  scalar defaults.
 
   ## Nested item schemas
 

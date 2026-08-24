@@ -34,8 +34,9 @@ defmodule Enact.Guardrails do
   Walks an input module recursively (through its embeds, with a cycle
   guard for self-referential schemas) and raises a teaching error on:
 
-  1. any scalar field with a non-nil default (embed fields excluded —
-     their structural `[]`/`nil` defaults are fine)
+  1. any scalar field with a non-nil default (embed fields and
+     parameterized array fields excluded — their structural `[]`/`nil`
+     defaults are the same as `embeds_many`)
   2. a primary key at any level
   3. associations at any level — embeds only
   4. top-level module only: missing `changeset/3` or `fields/1` exports,
@@ -86,8 +87,9 @@ defmodule Enact.Guardrails do
     # (`default: false` — the most common Ecto default in the wild)
     Enum.each(module.__schema__(:fields) -- embeds, fn field ->
       default = Map.get(defaults, field)
+      type = module.__schema__(:type, field)
 
-      unless is_nil(default) do
+      unless allowed_default?(default, type) do
         raise ArgumentError, """
         input schema #{inspect(module)} declares a default for field #{inspect(field)} \
         (#{inspect(default)}).
@@ -95,7 +97,9 @@ defmodule Enact.Guardrails do
         Input schemas must not declare field defaults: omitted fields are excluded \
         from extraction by presence, so a schema default never persists — it only \
         misleads validations into seeing a value the write will not contain. Put \
-        the default on the DB column (preferred) or the persistence schema instead.\
+        the default on the DB column (preferred) or the persistence schema instead. \
+        Structural `[]` on parameterized array fields is allowed — it is the same \
+        empty-collection default `embeds_many` uses.\
         """
       end
     end)
@@ -122,6 +126,15 @@ defmodule Enact.Guardrails do
       """
     end
   end
+
+  # nil is never a declared default. `[]` is allowed only on parameterized
+  # arrays — Ecto 3.12+ uses `{:parameterized, {mod, params}}`; 3.10–3.11
+  # uses `{:parameterized, mod, params}`. Primitive arrays (`{:array, :string}`)
+  # still raise: omitted vs `[]` is distinguishable there.
+  defp allowed_default?(nil, _type), do: true
+  defp allowed_default?([], {:array, {:parameterized, _}}), do: true
+  defp allowed_default?([], {:array, {:parameterized, _, _}}), do: true
+  defp allowed_default?(_default, _type), do: false
 
   defp check_contract!(module, mode) do
     unless function_exported?(module, :changeset, 3) do

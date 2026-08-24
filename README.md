@@ -135,7 +135,7 @@ defmodule MyApp.Projects.Inputs.ProjectInput do
 end
 ```
 
-`Enact.updates/2` extracts exactly the fields the caller provided, with their casted values — so PATCH semantics fall out: omitted keys are untouched, explicit `null` clears, arrays replace wholesale. `Enact.Guardrails` mechanically enforces the input-schema invariants (no field defaults, no primary keys, no associations) on first run and in CI.
+`Enact.updates/2` extracts exactly the fields the caller provided, with their casted values — so PATCH semantics fall out: omitted keys are untouched, explicit `null` clears, arrays replace wholesale. `Enact.Guardrails` mechanically enforces the input-schema invariants (no scalar field defaults, no primary keys, no associations) on first run and in CI.
 
 ## Errors
 
