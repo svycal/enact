@@ -84,7 +84,9 @@ defmodule Enact.InputSchema do
   confirmation digests) contains exactly the sub-keys the caller sent. An
   explicitly-null sub-key is present as `nil` (a clear); an omitted
   sub-key is absent (untouched), matching the omitted-vs-null handling of
-  top-level fields. `execute/2` merges the partial object over the
+  top-level fields. An object with no provided sub-keys (`{}`, or only
+  undeclared keys) is absent from the updates map. `execute/2` merges the
+  partial object over the
   subject's current value via `Enact.merged/4`.
 
   `embeds_many` fields cannot be declared partial — merging arrays

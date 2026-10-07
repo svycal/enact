@@ -429,7 +429,7 @@ defp flatten_booking_policy(updates, ctx) do
 end
 ```
 
-The cases resolve as follows: a provided sub-key merges; an explicitly-null sub-key is present as `nil` and clears that flag; an omitted sub-key is absent and stays untouched; a null for the whole object clears everything. Previews and digests contain exactly the provided sub-keys, so the user confirms the partial change itself.
+The cases resolve as follows: a provided sub-key merges; an explicitly-null sub-key is present as `nil` and clears that flag; an omitted sub-key is absent and stays untouched; a null for the whole object clears everything; an object with no provided sub-keys (`{}`, or only undeclared keys) is absent from the updates map, the same as an omitted embed. Previews and digests contain exactly the provided sub-keys, so the user confirms the partial change itself.
 
 ### Validating the merged result
 

@@ -137,6 +137,30 @@ defmodule Enact.PartialEmbedsTest do
       assert updates.settings == nil
     end
 
+    test "an empty object is absent from updates" do
+      assert {:ok, {updates, :not_merged}} = run(UpdatePref, %{"settings" => %{}})
+      assert updates == %{}
+    end
+
+    test "an object with only undeclared keys is absent from updates" do
+      assert {:ok, {updates, :not_merged}} =
+               run(UpdatePref, %{"settings" => %{"allow_c" => false}})
+
+      assert updates == %{}
+    end
+
+    test "undeclared keys alongside a provided sub-key keep the provided one" do
+      assert {:ok, {updates, _merged}} =
+               run(UpdatePref, %{"settings" => %{"allow_a" => nil, "allow_c" => false}})
+
+      assert updates.settings == %{allow_a: nil}
+    end
+
+    test "an empty object stays provided for validate/2" do
+      ctx = %Enact.Context{params: %{"settings" => %{}}}
+      assert Enact.provided?(ctx, :settings)
+    end
+
     test "applies on create too" do
       assert {:ok, updates} =
                run(CreatePref, %{"name" => "P", "settings" => %{"allow_a" => false}})
@@ -160,6 +184,13 @@ defmodule Enact.PartialEmbedsTest do
                )
 
       assert updates.settings == %{allow_b: false}
+    end
+
+    test "a preview whose only input is an empty object has no updates" do
+      assert {:ok, %Preview{updates: updates}} =
+               Enact.dry_run(UpdatePref, %{"settings" => %{}}, actor: :user, repo: FakeRepo)
+
+      assert updates == %{}
     end
 
     test "the digest binds the partial object and round-trips through run" do

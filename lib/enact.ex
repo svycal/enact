@@ -278,7 +278,9 @@ defmodule Enact do
   For embeds declared in the input module's `partial_embeds/1` manifest,
   the dumped map contains only the sub-keys the caller provided (an
   explicitly-null sub-key is present as `nil`; an omitted one is absent).
-  See `Enact.InputSchema`.
+  If the caller provided none of its sub-keys (`{}`, or only keys the
+  input schema does not declare), the embed is absent. See
+  `Enact.InputSchema`.
 
   Never use bare `apply_changes/1` output for persistence — it erases
   omitted-vs-provided. For `input: nil` actions this returns `%{}`.
@@ -380,8 +382,10 @@ defmodule Enact do
     Enum.reduce(partial_embeds(module, ctx.mode), updates, fn field, updates ->
       case updates do
         %{^field => %{} = value} ->
-          provided = Enum.filter(Map.keys(value), &provided?(ctx, [field, &1]))
-          %{updates | field => Map.take(value, provided)}
+          case Enum.filter(Map.keys(value), &provided?(ctx, [field, &1])) do
+            [] -> Map.delete(updates, field)
+            provided -> %{updates | field => Map.take(value, provided)}
+          end
 
         # absent (untouched) or nil (explicit whole-object clear)
         _ ->

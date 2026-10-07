@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- `Enact.updates/2` omits a partial embed when the caller provided none
+  of its sub-keys (`{}`, or only keys the input schema does not
+  declare). Previously the updates map carried `field => %{}`.
 - `Enact.Guardrails` allows the structural `[]` default on parameterized
   array fields (`{:array, {:parameterized, _}}`), matching `embeds_many`.
   Primitive array defaults (`{:array, :string}` and similar) still raise.
