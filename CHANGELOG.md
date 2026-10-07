@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 (2026-10-08)
 
 - `Enact.updates/2` omits a partial embed when the caller provided none
   of its sub-keys (`{}`, or only keys the input schema does not

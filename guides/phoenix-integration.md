@@ -6,7 +6,7 @@ Enact has no Phoenix dependency. A host application wires four integration point
 
 ```elixir
 # mix.exs
-{:enact, "~> 0.1.0"}
+{:enact, "~> 0.2.0"}
 
 # config/config.exs
 config :enact, repo: MyApp.Repo
