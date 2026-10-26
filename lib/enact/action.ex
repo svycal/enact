@@ -13,7 +13,7 @@ defmodule Enact.Action do
   or a single-purpose function over `(changeset | params, ctx)`. The runner
   (`Enact.run/3`) orchestrates them as:
 
-      load → authorize → cast → validate → resolve → execute → after_commit
+      load → authorize → rate limit → cast → validate → resolve → execute → after_commit
 
   """
 
@@ -70,6 +70,45 @@ defmodule Enact.Action do
   @callback authorize(ctx :: Context.t()) :: boolean() | {:error, term()}
 
   @doc """
+  Rate-limit buckets for this call: a list of `{key, window_ms, limit}`,
+  each allowing at most `limit` writes per `window_ms` milliseconds for
+  `key`. The default returns `[]`.
+
+  The runner calls it after `authorize/1` and before cast, in
+  `Enact.run/3` and `Enact.dry_run/3`. `ctx` has the actor, subject, raw
+  params, and passthrough assigns. If any bucket is full, the call
+  returns `{:error, %Enact.Error{type: :rate_limited}}`, with
+  `meta.retry_after_ms` set to the longest wait among the full buckets.
+
+  Dry runs check buckets without counting. Runs count one write against
+  every bucket after `repo.transaction/1` returns `{:ok, _}`, so an
+  invalid or rolled-back run uses no slot. If you call `Enact.run/3`
+  inside your own transaction, the runner counts before your transaction
+  commits, and a rollback of your transaction still uses the slot.
+  Concurrent runs that pass the check together can each commit, so a
+  bucket can exceed `limit` by the number of runs in flight.
+
+  The runner does not namespace keys by action. Actions that return the
+  same `{key, window_ms}` share a bucket. Include the action or a feature
+  name in the key unless you want that:
+
+      @impl Enact.Action
+      def rate_limits(ctx) do
+        [
+          {"team_invite:scope:\#{ctx.subject.id}", :timer.minutes(10), 10},
+          {"team_invite:user:\#{ctx.actor.id}", :timer.hours(1), 15}
+        ]
+      end
+
+  The adapter set in `config :enact, rate_limiter: MyApp.RateLimiter`
+  stores the buckets (see `Enact.RateLimiter`). Limits based on data, such as a cap on pending
+  records, belong in `validate/2`.
+  """
+  @callback rate_limits(ctx :: Context.t()) :: [
+              {key :: term(), window_ms :: pos_integer(), limit :: pos_integer()}
+            ]
+
+  @doc """
   Ordinary changeset pipeline for operation-specific rules (payload-
   intrinsic rules belong in the input module's own validations). Not
   invoked for `input: nil` actions.
@@ -102,6 +141,7 @@ defmodule Enact.Action do
   @optional_callbacks [
     config: 0,
     load_subject: 2,
+    rate_limits: 1,
     validate: 2,
     resolvers: 0,
     after_commit: 2
@@ -118,6 +158,9 @@ defmodule Enact.Action do
       def load_subject(_params, _ctx), do: :no_subject
 
       @impl Enact.Action
+      def rate_limits(_ctx), do: []
+
+      @impl Enact.Action
       def validate(changeset, _ctx), do: changeset
 
       @impl Enact.Action
@@ -128,6 +171,7 @@ defmodule Enact.Action do
 
       defoverridable config: 0,
                      load_subject: 2,
+                     rate_limits: 1,
                      validate: 2,
                      resolvers: 0,
                      after_commit: 2

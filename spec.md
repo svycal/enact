@@ -4,11 +4,11 @@ A thin, behaviour-based action layer for application write operations, published
 
 ## 1. Purpose and philosophy
 
-Enact standardizes the shape of every write operation: load → authorize → cast → validate → resolve → execute → after-commit. It is **Plug for writes** — the value is the uniform pipeline shape, the actor context, and the error taxonomy, not any novel validation or persistence machinery.
+Enact standardizes the shape of every write operation: load → authorize → rate limit → cast → validate → resolve → execute → after-commit. It is **Plug for writes** — the value is the uniform pipeline shape, the actor context, and the error taxonomy, not any novel validation or persistence machinery.
 
 **Enact orchestrates; Ecto does the work.** Validation is Ecto changesets. Input casting is Ecto embedded schemas. Persistence is the host application's existing Ecto schemas and changesets. Enact adds no parallel type system, no validation vocabulary, and no DSL.
 
-Target size: roughly 300–350 lines total (runner, Context, Error, Preview, Resolve, Validations helpers, Guardrails).
+Target size: roughly 300–350 lines total (runner, Context, Error, Preview, Resolve, Validations helpers, Guardrails, RateLimiter behaviour).
 
 ### Non-goals (decided, do not revisit during implementation)
 
@@ -36,7 +36,7 @@ Enact.run(ActionModule, params,
 
 # Returns:
 {:ok, result}
-{:error, %Enact.Error{type: :invalid | :forbidden | :not_found | :conflict | :internal}}
+{:error, %Enact.Error{type: :invalid | :forbidden | :not_found | :conflict | :rate_limited | :internal}}
 
 # same options as run/3, minus confirm_digest
 Enact.dry_run(ActionModule, params, actor: actor)
@@ -72,12 +72,13 @@ Every callback is either **pure data** or **a single-purpose function over (chan
 | `input/0`        | yes                   | data     | Input-schema module, or `nil` for input-less actions (§4)                                                                                                                                                 |
 | `load_subject/2`         | no (default `:no_subject`) | function | Fetch the subject — the URL-anchored record the action operates on _or within_ (the updated record in patch mode; the parent in create-under-parent). Always invoked. Default is a no-op; `nil` → `:not_found` |
 | `authorize/1`    | yes                   | function | `(ctx) → boolean \| {:error, reason}`. Required: a forgotten policy is indistinguishable from an open write. An open write is a written `true`. `false` → `:forbidden`; `{:error, reason}` → `:forbidden` carrying `reason` (`{:error, :foo}` → `%Enact.Error{type: :forbidden, reason: :foo}`). |
+| `rate_limits/1`  | no (default `[]`)     | function | `(ctx) → [{key, window_ms, limit}]` — rate-limit buckets for this call (§3.1)                                                                                                                             |
 | `validate/2`     | no (default identity) | function | Ordinary changeset pipeline; `(changeset, ctx) → changeset`. Not invoked for `input: nil` actions                                                                                                         |
 | `resolvers/0`    | no (default `[]`)     | data     | Reference-resolution spec (§7)                                                                                                                                                                            |
 | `execute/2`      | yes                   | function | Persist; `(changeset, ctx) → {:ok, term} \| {:error, term}`; runs in transaction                                                                                                                          |
 | `after_commit/2` | no (default `:ok`)    | function | Post-commit side effects (job insertion, analytics); never rolls back                                                                                                                                     |
 
-`use Enact.Action` sets `@behaviour Enact.Action` and `defoverridable` defaults for the optional callbacks (`config/0`, `load_subject/2`, `validate/2`, `resolvers/0`, `after_commit/2`). That is its entire body. `input/0`, `authorize/1`, and `execute/2` have no defaults — a missing `authorize/1` is a compile warning and a teaching `ArgumentError` at `run`/`dry_run`/`subject`/`authorized`.
+`use Enact.Action` sets `@behaviour Enact.Action` and `defoverridable` defaults for the optional callbacks (`config/0`, `load_subject/2`, `rate_limits/1`, `validate/2`, `resolvers/0`, `after_commit/2`). That is its entire body. `input/0`, `authorize/1`, and `execute/2` have no defaults — a missing `authorize/1` is a compile warning and a teaching `ArgumentError` at `run`/`dry_run`/`subject`/`authorized`.
 
 ### 2.3 Context
 
@@ -109,16 +110,17 @@ Some actions must accept unauthenticated callers (e.g. a public visitor creating
 
 ## 3. Pipeline
 
-**Full pipeline:** `load → authorize → cast → validate → resolve → execute → after_commit`
+**Full pipeline:** `load → authorize → rate limit → cast → validate → resolve → execute → after_commit`
 
-The load step always runs first, in either mode (rationale in invariant 3). The default `load_subject/2` returns `:no_subject` and leaves `ctx.subject` nil; override it to fetch a subject. `authorize/1` takes only `ctx` (not the changeset), so it runs before cast. `subject/3` and `authorized/3` are that prefix: `load → authorize`.
+The load step always runs first, in either mode (rationale in invariant 4). The default `load_subject/2` returns `:no_subject` and leaves `ctx.subject` nil; override it to fetch a subject. `authorize/1` takes only `ctx` (not the changeset), so it runs before cast. `subject/3` and `authorized/3` are that prefix: `load → authorize`.
 
 Ordering invariants (structural, not conventional):
 
 1. **Authorize before cast** — unauthorized callers trigger no input work.
-2. **Validate before resolve** — cheap gates expensive; garbage input never triggers reference loads.
-3. **Load before authorize and cast** — `authorize/1` reads `ctx.subject`; in patch mode the subject also supplies the validation base via `from_subject/1` (§5.3).
-4. **Execute inside `repo.transaction/1`**; `{:error, reason}` from execute rolls back. `after_commit` runs strictly after successful commit, outside the transaction.
+2. **Authorize before rate limit, rate limit before cast** — a forbidden actor never touches a bucket (it cannot exhaust another actor's limit), and a rate-limited caller triggers no input work.
+3. **Validate before resolve** — cheap gates expensive; garbage input never triggers reference loads.
+4. **Load before authorize and cast** — `authorize/1` reads `ctx.subject`; in patch mode the subject also supplies the validation base via `from_subject/1` (§5.3).
+5. **Execute inside `repo.transaction/1`**; `{:error, reason}` from execute rolls back. `after_commit` runs strictly after successful commit, outside the transaction.
 
 Runner error normalization:
 
@@ -126,11 +128,35 @@ Runner error normalization:
 - `load_subject/2` returning `:no_subject` (the default) → no subject.
 - `load_subject/2` returning nil → `:not_found`.
 - `authorize/1` false → `:forbidden`. `{:error, reason}` → `:forbidden` carrying `reason`. `{:error, %Enact.Error{}}` is passed through.
+- A full bucket from `rate_limits/1` → `:rate_limited` carrying `meta.retry_after_ms` (§3.1).
 - Post-validate `changeset.valid? == false` → `:invalid` carrying the changeset.
 - A `%Ecto.Changeset{}` error from `repo.insert/update` (declared constraints) → promoted to `:invalid`, not `:internal`.
 - Any other execute failure → `:internal` (see §8 discipline).
 
 **Where record-fetching lives:** URL-anchored records → `load_subject/2` (the subject); body-referenced records → `resolvers/0` (§7). Do **not** pass pre-loaded domain records via the `assigns:` passthrough: an externally-loaded record escapes trust-anchor enforcement, breaks `run`/`dry_run`/`subject`/`authorized` parity for callers with no controller (jobs, MCP), and makes provenance unauditable. Actions are self-contained — the extra query is the price, and it's cheap.
+
+### 3.1 Rate limits — `rate_limits/1` + `Enact.RateLimiter`
+
+Frequency limits on a write ("10 invitations per team per 10 minutes") are part of the action, declared once and enforced identically on every surface (browser, REST, MCP, jobs).
+
+```elixir
+@impl Enact.Action
+def rate_limits(ctx) do
+  [
+    {"team_invite:scope:#{ctx.subject.id}", :timer.minutes(10), 10},
+    {"team_invite:user:#{ctx.actor.id}", :timer.hours(1), 15}
+  ]
+end
+```
+
+- **A function over ctx, not data.** Keys derive from the actor, subject, and passthrough assigns (an anonymous caller's IP). It runs after load and authorize, so `ctx.subject` is set, and before cast, so it sees raw params only.
+- **Runs in `run/3` and `dry_run/3` only.** `subject/3` and `authorized/3` render forms and confirmation pages; a rate-limited caller can still view them.
+- **Check, then count after commit.** Both `run/3` and `dry_run/3` check every bucket without counting (`check/3`). A full bucket returns `:rate_limited` before cast. `run/3` counts one write against every bucket (`hit/3`) after the transaction commits, after the success event and before `after_commit/2`. A dry run, an invalid run, a rolled-back run, or a digest mismatch uses no slot. "Commits" means the runner's `repo.transaction/1` returned `{:ok, _}`: a run nested in a caller's transaction counts before the outer commit, and an outer rollback still uses the slot. A raising or exiting `hit/3` is logged, not propagated — the write has committed, and turning it into an exception invites a duplicate retry. The cost: check and count are not atomic, so concurrent runs that pass the check together can each commit, and a bucket can exceed its limit by the number of runs in flight. Counting before the transaction would make the check atomic but charge failed writes, which punishes callers for the app's own rollbacks; a compensating decrement on rollback is not expressible against fixed-window stores such as ExRated.
+- **Every bucket is counted.** A write counts against all of the action's buckets, not only the tightest. The `retry_after_ms` on the error is the longest wait among the full buckets, since every full bucket must open before a retry can succeed.
+- **Keys are global.** The runner does not prefix keys with the action. Adapters identify a bucket by `{key, window_ms}`, so one key can carry several windows. Actions that return equal keys and windows share a bucket (an invite and a resend drawing on one limit). Actions that should not share include a name in the key.
+- **Storage is an adapter.** `config :enact, rate_limiter: MyApp.RateLimiter` names a module implementing `Enact.RateLimiter` (`check/3`, `hit/3`). Enact takes no dependency on ExRated or any store; the behaviour moduledoc carries a 15-line ExRated adapter. An action that returns buckets with no adapter configured raises `ArgumentError`. Actions that return `[]` need no adapter.
+- **Alerting is the host's.** The runner emits `[:enact, :action, :rate_limited]` once per full bucket, with the key, window, limit, and `operation: :run | :dry_run`. The host attaches a handler and decides which keys alert.
+- **Out of scope:** limits computed from data ("five pending invitations per team") stay in `validate/2` as `:invalid` — the caller can fix them by changing the world, not by waiting. Request-flood guards (per-IP, per-path plugs) stay in the web layer, where they reject before an action is chosen.
 
 ## 4. Input schemas
 
@@ -406,13 +432,15 @@ end
 
 ```elixir
 defstruct [:type, :changeset, :reason, meta: %{}]
-# type: :invalid | :forbidden | :not_found | :conflict | :internal
-# Constructors: invalid/1 (changeset), forbidden/0-1, not_found/0-1, conflict/0-2, internal/1
+# type: :invalid | :forbidden | :not_found | :conflict | :rate_limited | :internal
+# Constructors: invalid/1 (changeset), forbidden/0-1, not_found/0-1, conflict/0-2,
+#   rate_limited/1-2 (retry_after_ms → meta), internal/1
 ```
 
-- **Closed taxonomy, HTTP-shaped:** invalid→422, forbidden→403, not_found→404, conflict→409, internal→500. No bespoke error atoms from actions — the renderer must never grow a default clause.
+- **Closed taxonomy, HTTP-shaped:** invalid→422, forbidden→403, not_found→404, conflict→409, rate_limited→429, internal→500. No bespoke error atoms from actions — the renderer must never grow a default clause.
 - **`reason`** is a stable term (atom, not a user-facing string) for logs, telemetry, and host rendering. Do not echo it wholesale. `:invalid` is the only type that carries caller-visible detail by default (the changeset — safe: it describes the caller's own input). The default renderer maps `type` to generic copy. The host may translate a closed set of host-owned reasons into copy, typically `:forbidden` from `authorize/1`. Do not use `:not_found` reasons to reveal that a record exists. Rendering = one `ErrorRenderer` using `traverse_errors/2`; handles nested/indexed embed errors with zero per-action knowledge; it is the API-versioning seam.
 - **`:conflict`** for optimistic/temporal races (resource claimed between validation and insert, stale_error_field). Input was fine; the world changed.
+- **`:rate_limited`** for a full bucket from `rate_limits/1` (§3.1). It is its own type rather than `:invalid` on `base` because the caller's remedy is to wait, not to change the input: REST renders 429 with `Retry-After` (from `meta.retry_after_ms`, rounded up to seconds), and agents read the wait instead of retrying blind.
 - **404/403 collapse** is renderer policy (defense in depth; tenant-scoped `load_subject/2` mostly produces `:not_found` for cross-tenant probes anyway). Internally keep both types — different bugs.
 - **`:internal` is a bug bucket.** Every production occurrence is either a bug or a missing promotion to a real type. Runner auto-promotes constraint-error changesets from repo failures to `:invalid`.
 - **Telemetry:** the runner emits, per-action, per-type, with zero action-author involvement:
@@ -420,8 +448,9 @@ defstruct [:type, :changeset, :reason, meta: %{}]
   - `[:enact, :action, :dry_run]` / `[:enact, :action, :dry_run, :error]`
   - `[:enact, :action, :subject]` / `[:enact, :action, :subject, :error]`
   - `[:enact, :action, :authorized]` / `[:enact, :action, :authorized, :error]`
+  - `[:enact, :action, :rate_limited]` — once per full bucket, with `%{retry_after_ms:}` measurements and `key`, `window_ms`, `limit`, `operation` metadata (§3.1)
   Error events carry `type:` (`Enact.Error` type). Distinct events so form GETs, previews, and executions are never conflated. A dry run or subject/authorized check is still an authorization-relevant event and should be auditable as one.
-- `meta` for machine-readable extras (retry_after, stable error codes) only.
+- `meta` for machine-readable extras (`retry_after_ms`, stable error codes) only.
 
 ## 9. Guardrails — `Enact.Guardrails`
 
@@ -463,6 +492,7 @@ Invocation: memoized first-`run` check, **plus** a CI test that calls it on ever
 | ------------------- | --------------------------------------------------------------------------------------------------------------------------------- | ------ |
 | `Enact`             | `run/3`, `dry_run/3`, `subject/3`, `authorized/3`, pipeline steps, `updates/2`, path-capable `provided?/2`, `merged/4`, digest, transaction/error normalization, telemetry | 120    |
 | `Enact.Action`      | behaviour + `__using__` defaults                                                                                                  | 40     |
+| `Enact.RateLimiter` | behaviour: `check/3`, `hit/3` storage adapter for `rate_limits/1`                                                                  | 15     |
 | `Enact.Context`     | struct                                                                                                                            | 15     |
 | `Enact.Actor`       | protocol: `anonymous?/1` + Any/Atom impls                                                                                         | 15     |
 | `Enact.InputSchema` | behaviour: `changeset/3`, `fields/1`, `from_subject/1`, `partial_embeds/1` + `cast_input/4` + moduledoc                           | 75     |
@@ -476,7 +506,7 @@ Invocation: memoized first-`run` check, **plus** a CI test that calls it on ever
 
 Packaging: ships as a Hex package from the start, so it can be shared across multiple host applications.
 
-- Dependencies: `ecto` (core only — no `ecto_sql` requirement; changesets ship without database machinery). `telemetry` for the runner events. Nothing else.
+- Dependencies: `ecto` (core only — no `ecto_sql` requirement; changesets ship without database machinery). `telemetry` for the runner events. Nothing else — rate-limit storage is a host adapter (§3.1).
 - The repo is injected per call (`repo:` option) or set via host-app config (`config :enact, repo: MyApp.Repo`) — the package itself never owns a repo.
 - Versioning: start at `0.x` and treat the behaviours (`Enact.Action`, `Enact.InputSchema`), the `Enact.Actor` protocol, the `Enact.Error` and `Enact.Preview` shapes, and the `Enact` module functions (`run/3`, `dry_run/3`, `subject/3`, `authorized/3`, `updates/2`, `provided?/2`) as the compatibility surface across consuming apps. Because multiple codebases consume it, breaking changes to callback signatures or the error taxonomy are the expensive kind — batch them.
 - No host-app assumptions: no auth coupling (fetchers own authorization), no HTTP/Phoenix dependency (the ErrorRenderer lives in the host; scope structs work as actors via opacity + `Enact.Actor`), no JSON library, no API-documentation tooling (§10).
@@ -486,7 +516,7 @@ Packaging: ships as a Hex package from the start, so it can be shared across mul
 
 Motivation: agent-facing surfaces (e.g. MCP tools with a confirmation step) need to take user input, validate it fully, and reflect the casted/normalized changes back for confirmation before anything persists.
 
-The pipeline is already staged for this: every step before `execute` is side-effect free (validate/resolve perform DB reads only; the transaction opens at persist). `dry_run/3` runs `load → authorize → cast → validate → resolve`, then stops.
+The pipeline is already staged for this: every step before `execute` is side-effect free (validate/resolve perform DB reads only; the rate-limit step checks buckets without counting; the transaction opens at persist). `dry_run/3` runs `load → authorize → rate limit → cast → validate → resolve`, then stops.
 
 ```elixir
 Enact.dry_run(ActionModule, params, actor: actor)

@@ -4,7 +4,7 @@ defmodule Enact.Error do
 
   Every failed `Enact.run/3`, `Enact.dry_run/3`, `Enact.subject/3`, or
   `Enact.authorized/3` returns
-  `{:error, %Enact.Error{}}` with one of five types, each mapping to an
+  `{:error, %Enact.Error{}}` with one of six types, each mapping to an
   HTTP status:
 
     * `:invalid` → 422 — bad input; carries the changeset (the only
@@ -14,6 +14,9 @@ defmodule Enact.Error do
       (or is outside the caller's tenant)
     * `:conflict` → 409 — input was fine; the world changed
       (optimistic/temporal races, confirmation-digest mismatch)
+    * `:rate_limited` → 429 — a bucket from `rate_limits/1` is full;
+      `meta.retry_after_ms` is the wait in milliseconds before a retry can
+      succeed
     * `:internal` → 500 — a bug bucket; every production occurrence is
       either a bug or a missing promotion to a real type
 
@@ -24,7 +27,8 @@ defmodule Enact.Error do
   fallback. Store atoms, not user-facing strings. Do not use `:not_found`
   reasons to distinguish "exists" from "not yours".
 
-  `meta` is for machine-readable extras (`retry_after`, stable error codes).
+  `meta` is for machine-readable extras (`retry_after_ms`, stable error
+  codes).
 
   Actions never invent bespoke error *types* — the closed taxonomy means
   the host app's renderer never grows a default clause for `type`.
@@ -32,7 +36,7 @@ defmodule Enact.Error do
 
   defstruct [:type, :changeset, :reason, meta: %{}]
 
-  @type type :: :invalid | :forbidden | :not_found | :conflict | :internal
+  @type type :: :invalid | :forbidden | :not_found | :conflict | :rate_limited | :internal
 
   @type t :: %__MODULE__{
           type: type(),
@@ -64,6 +68,22 @@ defmodule Enact.Error do
   @spec conflict(term(), map()) :: t()
   def conflict(reason \\ nil, meta \\ %{}),
     do: %__MODULE__{type: :conflict, reason: reason, meta: meta}
+
+  @doc """
+  Builds a `:rate_limited` error. `retry_after_ms` is stored in
+  `meta.retry_after_ms`.
+
+  The runner produces this when a bucket from `rate_limits/1` is full.
+  Render it as 429 with a `Retry-After` header in seconds, rounded up.
+  """
+  @spec rate_limited(non_neg_integer(), term()) :: t()
+  def rate_limited(retry_after_ms, reason \\ nil)
+      when is_integer(retry_after_ms) and retry_after_ms >= 0,
+      do: %__MODULE__{
+        type: :rate_limited,
+        reason: reason,
+        meta: %{retry_after_ms: retry_after_ms}
+      }
 
   @doc "Builds an `:internal` error with a reason for logs and telemetry."
   @spec internal(term()) :: t()

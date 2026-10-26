@@ -3,7 +3,7 @@
 A thin, behaviour-based action layer for application write operations. Enact standardizes the shape of every write:
 
 ```
-load → authorize → cast → validate → resolve → execute → after_commit
+load → authorize → rate limit → cast → validate → resolve → execute → after_commit
 ```
 
 The value is the uniform pipeline shape, the actor context, and the closed error taxonomy — not any novel validation or persistence machinery. **Enact orchestrates; Ecto does the work**: validation is Ecto changesets, input casting is Ecto embedded schemas, persistence is your existing schemas and changesets. No DSL, no parallel type system, no validation vocabulary.
@@ -139,7 +139,24 @@ end
 
 ## Errors
 
-Every failure is an `%Enact.Error{}` with one of five HTTP-shaped types: `:invalid` (422, carries the changeset), `:forbidden` (403), `:not_found` (404), `:conflict` (409), `:internal` (500). One renderer in your app handles all of them; actions never invent bespoke error atoms. Reference-resolution failures are field-level `"not found"` errors indistinguishable from validation failures — and cross-tenant probes are indistinguishable from nonexistent records.
+Every failure is an `%Enact.Error{}` with one of six HTTP-shaped types: `:invalid` (422, carries the changeset), `:forbidden` (403), `:not_found` (404), `:conflict` (409), `:rate_limited` (429, carries `meta.retry_after_ms`), `:internal` (500). One renderer in your app handles all of them; actions never invent bespoke error atoms. Reference-resolution failures are field-level `"not found"` errors indistinguishable from validation failures — and cross-tenant probes are indistinguishable from nonexistent records.
+
+## Rate limits
+
+Declare frequency limits on the action. Each bucket is `{key, window_ms, limit}`:
+
+```elixir
+@impl Enact.Action
+def rate_limits(ctx) do
+  [{"team_invite:user:#{ctx.actor.id}", :timer.hours(1), 15}]
+end
+```
+
+The runner checks every bucket after `authorize/1`. A full bucket returns `{:error, %Enact.Error{type: :rate_limited}}` with `meta.retry_after_ms`. Dry runs check without counting. Runs count against every bucket after the transaction commits. Set a storage adapter in config (see `Enact.RateLimiter` for an ExRated example):
+
+```elixir
+config :enact, rate_limiter: MyApp.RateLimiter
+```
 
 ## Dry runs and confirmation
 

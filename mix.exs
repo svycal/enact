@@ -66,7 +66,12 @@ defmodule Enact.MixProject do
         Guides: ["usage-rules.md", ~r/guides\/.*/]
       ],
       groups_for_modules: [
-        "Behaviours & protocols": [Enact.Action, Enact.InputSchema, Enact.Actor],
+        "Behaviours & protocols": [
+          Enact.Action,
+          Enact.InputSchema,
+          Enact.Actor,
+          Enact.RateLimiter
+        ],
         Data: [Enact.Context, Enact.Error, Enact.Preview],
         "Pipeline support": [Enact.Resolve, Enact.Validations, Enact.Guardrails],
         "Host helpers": [Enact.Delegates],

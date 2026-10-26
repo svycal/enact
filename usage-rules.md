@@ -1,6 +1,6 @@
 # Enact usage rules
 
-Rules for writing application code in a project that uses Enact. Enact standardizes every write operation as an action module run through `load → authorize → cast → validate → resolve → execute → after_commit`. Enact orchestrates; Ecto does the work — there is no DSL and no custom validation vocabulary.
+Rules for writing application code in a project that uses Enact. Enact standardizes every write operation as an action module run through `load → authorize → rate limit → cast → validate → resolve → execute → after_commit`. Enact orchestrates; Ecto does the work — there is no DSL and no custom validation vocabulary.
 
 ## Calling actions
 
@@ -70,10 +70,11 @@ end
 - `authorize/1` is required. Return `true`, `false`, or `{:error, reason}`. `false` becomes `{:error, %Enact.Error{type: :forbidden}}`; `{:error, :foo}` becomes `{:error, %Enact.Error{type: :forbidden, reason: :foo}}`. Use a host-owned atom for `reason` when the renderer should vary the 403 copy. Do not echo `reason` wholesale; do not put user-facing strings in it. An open write is a written `true` (`def authorize(_ctx), do: true`), never an omitted callback.
 - The URL-anchored record is the **subject** → override `load_subject/2` (the updated record in patch mode; the parent in create-under-parent). The default is a no-op (`:no_subject`); `nil` means `:not_found`. Body-referenced public ids → `resolvers/0`. No other fetching channel.
 - `load_subject/2` and every resolver fetcher **must scope by a trust anchor**: the actor's tenant when authenticated; a public-by-construction subject for `anonymous?: true` actions. Returning `nil` from `load_subject/2` produces `:not_found` — cross-tenant probes must be indistinguishable from nonexistent records.
-- Never invent error atoms. The taxonomy is closed: `:invalid`, `:forbidden`, `:not_found`, `:conflict`, `:internal`. To signal a race from `execute/2`, return `{:error, Enact.Error.conflict(:reason)}`.
+- Never invent error atoms. The taxonomy is closed: `:invalid`, `:forbidden`, `:not_found`, `:conflict`, `:rate_limited`, `:internal`. To signal a race from `execute/2`, return `{:error, Enact.Error.conflict(:reason)}`.
 - In `execute/2`: build the write from `Enact.updates(changeset, ctx)` — **never** from bare `apply_changes/1` (it erases omitted-vs-provided). Translate public ids by reading `ctx.assigns` (e.g. `ctx.assigns.owner.id`). The updates map is persistence-ready: embeds arrive as plain maps, so feed it straight to your persistence changeset. Declare DB constraints; the runner promotes constraint-error changesets to `:invalid`.
 - Values the action decides (tenant, parent id, default permissions) are stamped in `execute/2` from `ctx.actor`, `ctx.subject`, or policy — not passed in. Do not give one field two sources (params for users, assigns for the system). Split the action or the input module when the payloads differ.
 - `after_commit/2` is for post-commit side effects only (job insertion, analytics). It runs outside the transaction and can never roll back.
+- Frequency limits ("15 invitations per hour per user") → `rate_limits/1`, returning `[{key, window_ms, limit}]` built from `ctx.actor`, `ctx.subject`, or `ctx.assigns`. Do not call a rate-limit store from `validate/2` or `execute/2`. Include a feature name in each key; actions that return equal keys share a bucket. Limits computed from data ("five pending invitations") stay in `validate/2`. Alert from a `[:enact, :action, :rate_limited]` telemetry handler, not from the action. Requires `config :enact, rate_limiter:` (an `Enact.RateLimiter` adapter).
 - Archive/cancel/resend-style actions: `mode: :patch, input: nil` plus an overridden `load_subject/2` — preconditions go in `authorize/1`, subject checks in `load_subject/2`.
 
 ## Input schemas
@@ -109,7 +110,7 @@ Omitted key → untouched. Explicit `null` → clears the scalar. Array key pres
 
 ## Errors
 
-- One renderer handles the closed taxonomy; it must never need a default clause for `type`. Default copy is generic by type. You may match host-owned `reason` atoms (usually `:forbidden`) to vary the message; do not echo `reason` wholesale. The only type that carries caller-visible detail by default is `:invalid` via the changeset.
+- One renderer handles the closed taxonomy; it must never need a default clause for `type`. Render `:rate_limited` as 429 with a `Retry-After` header: `meta.retry_after_ms` in seconds, rounded up. Default copy is generic by type. You may match host-owned `reason` atoms (usually `:forbidden`) to vary the message; do not echo `reason` wholesale. The only type that carries caller-visible detail by default is `:invalid` via the changeset.
 
 ## Testing
 

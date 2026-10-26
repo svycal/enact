@@ -30,6 +30,13 @@ defmodule Enact.ErrorTest do
              Error.conflict(:busy, %{retry_after: 5})
   end
 
+  test "rate_limited/1-2" do
+    assert %Error{type: :rate_limited, reason: nil, meta: %{retry_after_ms: 1_500}} =
+             Error.rate_limited(1_500)
+
+    assert %Error{type: :rate_limited, reason: :hourly} = Error.rate_limited(0, :hourly)
+  end
+
   test "internal/1 requires a reason" do
     assert %Error{type: :internal, reason: {:boom, "oops"}} = Error.internal({:boom, "oops"})
   end

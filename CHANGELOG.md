@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+- `rate_limits/1` optional callback on `Enact.Action`. It returns
+  rate-limit buckets as `{key, window_ms, limit}`. `Enact.run/3` and
+  `Enact.dry_run/3` check them after `authorize/1` and before cast. Dry
+  runs do not count. Runs count against every bucket after the
+  transaction commits.
+- `Enact.RateLimiter` behaviour (`check/3`, `hit/3`) for bucket storage,
+  set with `config :enact, rate_limiter: MyApp.RateLimiter`. Enact adds
+  no storage dependency.
+- New error type `:rate_limited` (429), built with
+  `Enact.Error.rate_limited/1-2`. `meta.retry_after_ms` holds the wait.
+  Host renderers must add a clause for it.
+- `[:enact, :action, :rate_limited]` telemetry event, emitted once per
+  full bucket.
+
 ## 0.2.0 (2026-10-08)
 
 - `Enact.updates/2` omits a partial embed when the caller provided none

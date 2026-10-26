@@ -4,7 +4,7 @@ defmodule Enact do
 
   Enact standardizes the shape of every write:
 
-      load → authorize → cast → validate → resolve → execute → after_commit
+      load → authorize → rate limit → cast → validate → resolve → execute → after_commit
 
   Actions implement `Enact.Action`; input casting and validation are plain
   Ecto via `Enact.InputSchema` modules; results are `{:ok, result}` or
@@ -26,6 +26,13 @@ defmodule Enact do
       fetching belongs in `load_subject/2` / `resolvers/0`; persistable
       values are params or stamped in `execute/2`.
 
+  ## Configuration
+
+    * `config :enact, repo: MyApp.Repo` — the default repo.
+    * `config :enact, rate_limiter: MyApp.RateLimiter` — the
+      `Enact.RateLimiter` adapter. Required only by actions whose
+      `rate_limits/1` returns buckets.
+
   Unknown options raise `ArgumentError` — a misspelled option (an
   `assigns:` typo, or worse, a `confirm_digest:` typo silently skipping
   the confirmation check) must never be ignored.
@@ -36,6 +43,8 @@ defmodule Enact do
     * `authorize/1` returning `false` → `:forbidden`; `{:error, reason}` →
       `:forbidden` with that reason (`{:error, :foo}` becomes
       `{:error, %Enact.Error{type: :forbidden, reason: :foo}}`)
+    * a full bucket from `rate_limits/1` → `:rate_limited`, with
+      `meta.retry_after_ms`
     * post-validate invalid changeset → `:invalid` (one response carries
       all cast + validation errors; there is no cast-stage fast-fail)
     * `%Ecto.Changeset{}` error from execute (declared constraints) →
@@ -55,10 +64,18 @@ defmodule Enact do
       — distinct events so form GETs, previews, and executions are
       never conflated
 
+  `[:enact, :action, :rate_limited]` fires once per full bucket when
+  `run/3` or `dry_run/3` returns `:rate_limited`. Measurements are
+  `%{retry_after_ms: integer}`. Metadata is `%{action:, mode:, actor:,
+  operation: :run | :dry_run, key:, window_ms:, limit:}`. Attach a
+  handler to alert on specific keys.
+
   The run event fires after a successful commit but before
   `after_commit/2` runs, so a raising side effect cannot suppress the
   audit record of a committed write.
   """
+
+  require Logger
 
   alias Enact.{Actor, Context, Error, Preview}
 
@@ -67,6 +84,11 @@ defmodule Enact do
 
   Returns `{:ok, result}` (whatever `execute/2` produced) or
   `{:error, %Enact.Error{}}`.
+
+  After the transaction commits, the runner counts one write against
+  each bucket from `rate_limits/1`, then calls `after_commit/2`. If the
+  adapter's `hit/3` raises, the runner logs the error and still returns
+  `{:ok, result}`.
 
   Accepts one option beyond the shared set: `:confirm_digest` — a digest
   from a prior `dry_run/3` preview. The runner recomputes the digest
@@ -86,13 +108,14 @@ defmodule Enact do
     {config, ctx} = build(action, params, opts)
     start = System.monotonic_time()
 
-    with {:ok, changeset, ctx, _resolved} <- pre_execute(action, config, ctx),
+    with {:ok, changeset, ctx, _resolved, limits} <- pre_execute(action, config, ctx, :run),
          :ok <- check_digest(action, changeset, ctx, opts),
          {:ok, result} <- persist(action, changeset, ctx) do
       # the success event fires after commit but before after_commit/2, so
       # a raising side effect cannot suppress the audit record of a
       # committed write
       emit({:ok, result}, :run, action, ctx, start)
+      hit_buckets(limits)
       action.after_commit(result, ctx)
       {:ok, result}
     else
@@ -103,9 +126,10 @@ defmodule Enact do
   end
 
   @doc """
-  Runs the side-effect-free front of the pipeline — load, authorize, cast,
-  validate, resolve — then stops before any write, returning
-  `{:ok, %Enact.Preview{}}` or the identical error surface to `run/3`.
+  Runs the side-effect-free front of the pipeline — load, authorize,
+  rate limit, cast, validate, resolve — then stops before any write,
+  returning `{:ok, %Enact.Preview{}}` or the identical error surface to
+  `run/3`. Rate-limit buckets are checked but not counted.
 
   Built for confirmation flows (agent-facing surfaces, MCP tools): the
   preview reflects the casted, normalized updates back for confirmation,
@@ -123,8 +147,8 @@ defmodule Enact do
     start = System.monotonic_time()
 
     result =
-      case pre_execute(action, config, ctx) do
-        {:ok, changeset, ctx, resolved} ->
+      case pre_execute(action, config, ctx, :dry_run) do
+        {:ok, changeset, ctx, resolved, _limits} ->
           updates = updates(changeset, ctx)
 
           {:ok,
@@ -452,11 +476,13 @@ defmodule Enact do
     end
   end
 
-  defp pre_execute(action, config, ctx) do
+  defp pre_execute(action, config, ctx, operation) do
     with {:ok, ctx} <- load_and_authorize(action, config, ctx),
+         {:ok, limits} <- check_rate_limits(action, ctx, operation),
          changeset = cast(action, ctx),
-         {:ok, changeset} <- validate(action, changeset, ctx) do
-      Enact.Resolve.run(action.resolvers(), changeset, ctx)
+         {:ok, changeset} <- validate(action, changeset, ctx),
+         {:ok, changeset, ctx, resolved} <- Enact.Resolve.run(action.resolvers(), changeset, ctx) do
+      {:ok, changeset, ctx, resolved, limits}
     end
   end
 
@@ -506,6 +532,15 @@ defmodule Enact do
         raise ArgumentError,
               "the :actor option is required — every write must answer \"as whom?\""
     end
+  end
+
+  defp fetch_rate_limiter!(action) do
+    Application.get_env(:enact, :rate_limiter) ||
+      raise ArgumentError, """
+      #{inspect(action)}.rate_limits/1 returned buckets, but no rate limiter \
+      is configured. Set `config :enact, rate_limiter: MyApp.RateLimiter` to a \
+      module implementing Enact.RateLimiter.
+      """
   end
 
   defp fetch_repo!(opts) do
@@ -596,6 +631,89 @@ defmodule Enact do
     end
   end
 
+  # Returns {limiter, buckets} so run/3 counts the same buckets with the
+  # same adapter after commit, or nil when the action has no buckets.
+  defp check_rate_limits(action, ctx, operation) do
+    case rate_limits(action, ctx) do
+      [] ->
+        {:ok, nil}
+
+      buckets ->
+        limiter = fetch_rate_limiter!(action)
+        full = Enum.flat_map(buckets, &check_bucket(limiter, &1))
+
+        if full == [] do
+          {:ok, {limiter, buckets}}
+        else
+          Enum.each(full, &emit_rate_limited(&1, action, ctx, operation))
+          retry_after_ms = full |> Enum.map(&elem(&1, 1)) |> Enum.max()
+          {:error, Error.rate_limited(retry_after_ms)}
+        end
+    end
+  end
+
+  defp rate_limits(action, ctx) do
+    if function_exported?(action, :rate_limits, 1) do
+      buckets = action.rate_limits(ctx)
+
+      unless is_list(buckets) and Enum.all?(buckets, &valid_bucket?/1) do
+        raise ArgumentError,
+              "#{inspect(action)}.rate_limits/1 must return a list of " <>
+                "{key, window_ms, limit} tuples with positive integer window_ms " <>
+                "and limit; got: #{inspect(buckets)}"
+      end
+
+      buckets
+    else
+      []
+    end
+  end
+
+  defp valid_bucket?({_key, window_ms, limit}),
+    do: is_integer(window_ms) and window_ms > 0 and is_integer(limit) and limit > 0
+
+  defp valid_bucket?(_other), do: false
+
+  defp check_bucket(limiter, {key, window_ms, limit} = bucket) do
+    case limiter.check(key, window_ms, limit) do
+      :ok ->
+        []
+
+      {:error, retry_after_ms} when is_integer(retry_after_ms) and retry_after_ms >= 0 ->
+        [{bucket, retry_after_ms}]
+
+      other ->
+        raise ArgumentError,
+              "#{inspect(limiter)}.check/3 must return :ok or " <>
+                "{:error, retry_after_ms}; got: #{inspect(other)}"
+    end
+  end
+
+  # The write has committed, so a failing adapter is logged and the run
+  # still returns {:ok, result} and calls after_commit/2.
+  defp hit_buckets(nil), do: :ok
+
+  defp hit_buckets({limiter, buckets}) do
+    Enum.each(buckets, fn {key, window_ms, limit} ->
+      try do
+        limiter.hit(key, window_ms, limit)
+      rescue
+        exception ->
+          log_hit_failure(limiter, key, Exception.format(:error, exception, __STACKTRACE__))
+      catch
+        kind, reason ->
+          log_hit_failure(limiter, key, Exception.format(kind, reason, __STACKTRACE__))
+      end
+    end)
+  end
+
+  defp log_hit_failure(limiter, key, formatted) do
+    Logger.error(
+      "#{inspect(limiter)}.hit/3 failed for rate-limit key #{inspect(key)}; " <>
+        "the write committed but was not counted\n" <> formatted
+    )
+  end
+
   defp cast(action, ctx) do
     case action.input() do
       nil -> Ecto.Changeset.change({%{}, %{}})
@@ -664,6 +782,22 @@ defmodule Enact do
   end
 
   ## Telemetry
+
+  defp emit_rate_limited({{key, window_ms, limit}, retry_after_ms}, action, ctx, operation) do
+    :telemetry.execute(
+      [:enact, :action, :rate_limited],
+      %{retry_after_ms: retry_after_ms},
+      %{
+        action: action,
+        mode: ctx.mode,
+        actor: ctx.actor,
+        operation: operation,
+        key: key,
+        window_ms: window_ms,
+        limit: limit
+      }
+    )
+  end
 
   defp emit(:ok, kind, action, ctx, start), do: emit({:ok, :ok}, kind, action, ctx, start)
 

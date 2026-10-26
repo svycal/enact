@@ -145,7 +145,7 @@ end
 
 ## Inertia / HTML form posts
 
-JSON controllers can `with` on the context function because success is a render and every error is a status. Inertia form posts are different: success, `:invalid`, and `:conflict` are Phoenix `redirect/2` (Inertia intercepts those). `:invalid` in particular is not a 422 page — `assign_errors/2` (from [inertia-phoenix](https://github.com/inertiajs/inertia-phoenix)) stashes the changeset and the next GET paints the form. That is the Inertia contract, not Enact's.
+JSON controllers can `with` on the context function because success is a render and every error is a status. Inertia form posts are different: success, `:invalid`, `:conflict`, and `:rate_limited` are Phoenix `redirect/2` (Inertia intercepts those). `:invalid` in particular is not a 422 page — `assign_errors/2` (from [inertia-phoenix](https://github.com/inertiajs/inertia-phoenix)) stashes the changeset and the next GET paints the form. That is the Inertia contract, not Enact's.
 
 `:forbidden`, `:not_found`, and `:internal` still belong to `action_fallback`. Return the error tuple; do not call the fallback module from the helper. `action_fallback` only runs when the action returns something other than a `%Plug.Conn{}`.
 
@@ -172,6 +172,11 @@ defmodule MyAppWeb.Enact do
         |> put_flash(:error, Keyword.fetch!(opts, :conflict_flash))
         |> redirect(to: Keyword.get(opts, :conflict_path, Keyword.fetch!(opts, :success_path)))
 
+      {:error, %Enact.Error{type: :rate_limited}} ->
+        conn
+        |> put_flash(:error, "Too many attempts. Try again later.")
+        |> redirect(to: Keyword.fetch!(opts, :invalid_path))
+
       {:error, %Enact.Error{type: type} = error}
       when type in [:forbidden, :not_found, :internal] ->
         {:error, error}
@@ -193,7 +198,7 @@ def create(conn, params) do
 end
 ```
 
-If the success redirect needs the created record (`~p"/projects/#{project}"`), take it from `{:ok, value}`. Conflict has no new record, so that path cannot be the conflict default.
+If the success redirect needs the created record (`~p"/projects/#{project}"`), take it from `{:ok, value}`. Conflict has no new record, so that path cannot be the conflict default. A rate-limited post redirects to the form; the inputs were not checked, so the form shows no field errors.
 
 Import the helper from `use MyAppWeb, :controller` if you want it on every controller. Keep the name prefixed (`enact_redirect/3`) so it does not collide with `Phoenix.Controller.redirect/2`, and import with `only:` so later host helpers do not leak into API controllers.
 
@@ -209,15 +214,23 @@ defmodule MyAppWeb.FallbackController do
 
   def call(conn, {:error, %Enact.Error{} = error}) do
     conn
+    |> put_retry_after(error)
     |> put_status(status(error.type))
     |> put_view(json: MyAppWeb.ErrorJSON)
     |> render(:enact, error: error)
   end
 
+  defp put_retry_after(conn, %Enact.Error{type: :rate_limited, meta: %{retry_after_ms: ms}}) do
+    put_resp_header(conn, "retry-after", Integer.to_string(ceil(ms / 1000)))
+  end
+
+  defp put_retry_after(conn, _error), do: conn
+
   defp status(:invalid), do: :unprocessable_entity
   defp status(:forbidden), do: :forbidden
   defp status(:not_found), do: :not_found
   defp status(:conflict), do: :conflict
+  defp status(:rate_limited), do: :too_many_requests
   defp status(:internal), do: :internal_server_error
 end
 ```
@@ -240,6 +253,7 @@ defmodule MyAppWeb.ErrorJSON do
   defp detail(:forbidden), do: "Forbidden"
   defp detail(:not_found), do: "Not found"
   defp detail(:conflict), do: "Conflict"
+  defp detail(:rate_limited), do: "Too many requests"
   defp detail(:internal), do: "Internal server error"
 
   defp translate_error({msg, opts}) do
