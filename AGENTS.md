@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Enact is a thin action layer for application writes. `spec.md` is the design. `usage-rules.md` is for host-app authors.
+Enact is a thin action layer for application writes. `spec.md` is the design. `usage-rules.md` is for host-app authors. `RELEASING.md` describes how releases are cut. Agent skills for repo workflows live in `.agents/skills/` (`.claude/skills` is a symlink to it).
 
 ## Commands
 
