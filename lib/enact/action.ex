@@ -81,12 +81,13 @@ defmodule Enact.Action do
   `meta.retry_after_ms` set to the longest wait among the full buckets.
 
   Dry runs check buckets without counting. Runs count one write against
-  every bucket after `repo.transaction/1` returns `{:ok, _}`, so an
-  invalid or rolled-back run uses no slot. If you call `Enact.run/3`
-  inside your own transaction, the runner counts before your transaction
-  commits, and a rollback of your transaction still uses the slot.
-  Concurrent runs that pass the check together can each commit, so a
-  bucket can exceed `limit` by the number of runs in flight.
+  every bucket after validation and the digest check, just before
+  `repo.transaction/1`. The adapter counts and checks in one step, so
+  concurrent runs cannot exceed `limit`. An invalid run or a digest
+  mismatch uses no slot. A run that rolls back after counting still uses
+  its slots. So does a run that another bucket rejects at the count: it
+  returns `:rate_limited`, and the slots it took in its other buckets
+  stay counted.
 
   The runner does not namespace keys by action. Actions that return the
   same `{key, window_ms}` share a bucket. Include the action or a feature

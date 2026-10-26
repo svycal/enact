@@ -152,7 +152,7 @@ def rate_limits(ctx) do
 end
 ```
 
-The runner checks every bucket after `authorize/1`. A full bucket returns `{:error, %Enact.Error{type: :rate_limited}}` with `meta.retry_after_ms`. Dry runs check without counting. Runs count against every bucket after the transaction commits. Set a storage adapter in config (see `Enact.RateLimiter` for an ExRated example):
+The runner checks every bucket after `authorize/1`. A full bucket returns `{:error, %Enact.Error{type: :rate_limited}}` with `meta.retry_after_ms`. Dry runs check without counting. Runs count against every bucket just before the transaction opens, and the adapter's count is atomic, so concurrent runs cannot exceed a limit. Set a storage adapter in config (see `Enact.RateLimiter` for an ExRated example):
 
 ```elixir
 config :enact, rate_limiter: MyApp.RateLimiter

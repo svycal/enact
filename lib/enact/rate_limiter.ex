@@ -16,22 +16,28 @@ defmodule Enact.RateLimiter do
     * `check/3` reports whether a bucket has room for one more write. It
       does not count. `Enact.run/3` and `Enact.dry_run/3` call it after
       `authorize/1`.
-    * `hit/3` counts one write against a bucket. `Enact.run/3` calls it
-      once per bucket after the transaction commits. The runner ignores
-      its return value.
+    * `hit/3` counts one write against a bucket and reports whether the
+      bucket had room for it, in one atomic step. `Enact.run/3` calls it
+      once per bucket after validation and before the transaction opens.
+      A full bucket stops the run with `:rate_limited`.
 
   Each bucket is `{key, window_ms, limit}`: at most `limit` writes per
   `window_ms` milliseconds for `key`. Store counts per `{key, window_ms}`,
   so one key can carry a per-minute and a per-hour limit without the two
   sharing a count. ExRated does this.
 
-  If `hit/3` raises or exits, the runner logs the error and the run
-  still succeeds, because the write has already committed.
+  `hit/3` must be atomic: two concurrent calls on a bucket with one slot
+  left must not both return `:ok`. If `hit/3` raises or exits, the run
+  raises, and nothing is written.
 
   ## Example: ExRated
 
   ExRated uses fixed windows. `inspect_bucket/3` reads a bucket without
-  counting, and `check_rate/3` counts.
+  counting. `check_rate/3` counts and checks in the calling process,
+  directly against ExRated's ETS table. On an existing bucket the count is
+  atomic. The first write in each window creates the bucket in two steps,
+  so concurrent first writes can lose a count, and the window can allow
+  one extra write per lost count.
 
       defmodule MyApp.RateLimiter do
         @behaviour Enact.RateLimiter
@@ -46,8 +52,16 @@ defmodule Enact.RateLimiter do
 
         @impl Enact.RateLimiter
         def hit(key, window_ms, limit) do
-          ExRated.check_rate(key, window_ms, limit)
-          :ok
+          case ExRated.check_rate(key, window_ms, limit) do
+            {:ok, _count} ->
+              :ok
+
+            {:error, _limit} ->
+              {_count, _remaining, ms_to_next, _created_at, _updated_at} =
+                ExRated.inspect_bucket(key, window_ms, limit)
+
+              {:error, ms_to_next}
+          end
         end
       end
 
@@ -71,8 +85,10 @@ defmodule Enact.RateLimiter do
               :ok | {:error, retry_after_ms :: non_neg_integer()}
 
   @doc """
-  Counts one write against the bucket. The runner ignores the return
-  value.
+  Counts one write against the bucket. Returns `:ok` when the bucket had
+  room for it, or `{:error, retry_after_ms}` when it was already full.
+  Must count and check atomically.
   """
-  @callback hit(key(), window_ms :: pos_integer(), limit :: pos_integer()) :: term()
+  @callback hit(key(), window_ms :: pos_integer(), limit :: pos_integer()) ::
+              :ok | {:error, retry_after_ms :: non_neg_integer()}
 end

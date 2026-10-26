@@ -126,6 +126,16 @@ defmodule Enact.RateLimitsTest do
     def hit(_key, _window_ms, _limit), do: :ok
   end
 
+  defmodule BadHitLimiter do
+    @behaviour Enact.RateLimiter
+
+    @impl Enact.RateLimiter
+    def check(_key, _window_ms, _limit), do: :ok
+
+    @impl Enact.RateLimiter
+    def hit(_key, _window_ms, _limit), do: :nope
+  end
+
   ## Defaults
 
   test "use Enact.Action defaults rate_limits/1 to []" do
@@ -146,16 +156,34 @@ defmodule Enact.RateLimitsTest do
   ## run/3
 
   describe "run/3" do
-    test "checks every bucket, then counts each one after the commit" do
+    test "checks every bucket, then counts each one before the transaction" do
       assert {:ok, _} = run(Limited, @valid)
+
+      {:messages, messages} = Process.info(self(), :messages)
+      hits = for {{FakeRateLimiter, :hit, _}, i} <- Enum.with_index(messages), do: i
+      transaction = Enum.find_index(messages, &(&1 == {FakeRepo, :transaction}))
+      assert length(hits) == 2
+      assert is_integer(transaction)
+      assert Enum.max(hits) < transaction
 
       assert_received {FakeRateLimiter, :check, "subject:p1"}
       assert_received {FakeRateLimiter, :check, "actor:user"}
-      assert_received {FakeRepo, :transaction}
       assert_received {FakeRateLimiter, :hit, "subject:p1"}
       assert_received {FakeRateLimiter, :hit, "actor:user"}
 
       assert FakeRateLimiter.count("subject:p1", @ten_minutes) == 1
+      assert FakeRateLimiter.count("actor:user", @hour) == 1
+    end
+
+    test "returns :rate_limited when a bucket fills between the check and the count" do
+      FakeRateLimiter.fill_after_check("subject:p1")
+
+      assert {:error, %Error{type: :rate_limited, meta: %{retry_after_ms: @ten_minutes}}} =
+               run(Limited, @valid)
+
+      refute_received {FakeRepo, :transaction}
+      assert FakeRateLimiter.count("subject:p1", @ten_minutes) == 2
+      # the other bucket had room, so its slot stays taken
       assert FakeRateLimiter.count("actor:user", @hour) == 1
     end
 
@@ -211,10 +239,10 @@ defmodule Enact.RateLimitsTest do
       refute_received {FakeRateLimiter, :hit, _}
     end
 
-    test "a rolled-back run counts nothing" do
+    test "a rolled-back run keeps its slots" do
       Process.put(:execute_result, {:error, :boom})
       assert {:error, %Error{type: :internal}} = run(Limited, @valid)
-      refute_received {FakeRateLimiter, :hit, _}
+      assert FakeRateLimiter.count("subject:p1", @ten_minutes) == 1
     end
 
     test "a digest mismatch counts nothing" do
@@ -304,6 +332,17 @@ defmodule Enact.RateLimitsTest do
                        %{operation: :dry_run, key: "actor:user"}}
     end
 
+    test "a bucket full at the count reports operation: :run" do
+      FakeRateLimiter.fill_after_check("subject:p1")
+      assert {:error, _} = run(Limited, @valid)
+
+      assert_received {:telemetry, [:enact, :action, :rate_limited], _,
+                       %{operation: :run, key: "subject:p1"}}
+
+      assert_received {:telemetry, [:enact, :action, :run, :error], _,
+                       %{action: Limited, type: :rate_limited}}
+    end
+
     test "a successful run emits no rate_limited event" do
       assert {:ok, _} = run(Limited, @valid)
       refute_received {:telemetry, [:enact, :action, :rate_limited], _, _}
@@ -325,9 +364,14 @@ defmodule Enact.RateLimitsConfigTest do
   # changes the global :rate_limiter config
   use ExUnit.Case, async: false
 
-  import ExUnit.CaptureLog
+  alias Enact.RateLimitsTest.{
+    AfterCommitSpy,
+    BadHitLimiter,
+    BadLimiter,
+    Limited,
+    RaisingHitLimiter
+  }
 
-  alias Enact.RateLimitsTest.{AfterCommitSpy, BadLimiter, Limited, RaisingHitLimiter}
   alias EnactTest.{FakeRateLimiter, FakeRepo}
 
   setup do
@@ -344,17 +388,23 @@ defmodule Enact.RateLimitsConfigTest do
     end
   end
 
-  test "a raising hit/3 is logged, and the run succeeds and calls after_commit/2" do
+  test "a raising hit/3 raises before the transaction" do
     Application.put_env(:enact, :rate_limiter, RaisingHitLimiter)
 
-    log =
-      capture_log(fn ->
-        assert {:ok, :done} = Enact.run(AfterCommitSpy, %{}, actor: :user, repo: FakeRepo)
-      end)
+    assert_raise RuntimeError, "store down", fn ->
+      Enact.run(AfterCommitSpy, %{}, actor: :user, repo: FakeRepo)
+    end
 
-    assert log =~ "hit/3 failed for rate-limit key \"spy\""
-    assert log =~ "store down"
-    assert_received {:after_commit, :done}
+    refute_received {FakeRepo, :transaction}
+    refute_received {:after_commit, _}
+  end
+
+  test "a malformed hit/3 return raises" do
+    Application.put_env(:enact, :rate_limiter, BadHitLimiter)
+
+    assert_raise ArgumentError, ~r/hit\/3 must return :ok or/, fn ->
+      Enact.run(AfterCommitSpy, %{}, actor: :user, repo: FakeRepo)
+    end
   end
 
   test "a malformed check/3 return raises" do

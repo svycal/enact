@@ -75,8 +75,6 @@ defmodule Enact do
   audit record of a committed write.
   """
 
-  require Logger
-
   alias Enact.{Actor, Context, Error, Preview}
 
   @doc """
@@ -85,10 +83,10 @@ defmodule Enact do
   Returns `{:ok, result}` (whatever `execute/2` produced) or
   `{:error, %Enact.Error{}}`.
 
-  After the transaction commits, the runner counts one write against
-  each bucket from `rate_limits/1`, then calls `after_commit/2`. If the
-  adapter's `hit/3` raises, the runner logs the error and still returns
-  `{:ok, result}`.
+  After validation and the digest check, and before the transaction
+  opens, the runner counts one write against each bucket from
+  `rate_limits/1`. If a bucket filled after the earlier check, the run
+  returns `:rate_limited` and writes nothing.
 
   Accepts one option beyond the shared set: `:confirm_digest` — a digest
   from a prior `dry_run/3` preview. The runner recomputes the digest
@@ -110,12 +108,12 @@ defmodule Enact do
 
     with {:ok, changeset, ctx, _resolved, limits} <- pre_execute(action, config, ctx, :run),
          :ok <- check_digest(action, changeset, ctx, opts),
+         :ok <- hit_rate_limits(limits, action, ctx),
          {:ok, result} <- persist(action, changeset, ctx) do
       # the success event fires after commit but before after_commit/2, so
       # a raising side effect cannot suppress the audit record of a
       # committed write
       emit({:ok, result}, :run, action, ctx, start)
-      hit_buckets(limits)
       action.after_commit(result, ctx)
       {:ok, result}
     else
@@ -632,7 +630,7 @@ defmodule Enact do
   end
 
   # Returns {limiter, buckets} so run/3 counts the same buckets with the
-  # same adapter after commit, or nil when the action has no buckets.
+  # same adapter, or nil when the action has no buckets.
   defp check_rate_limits(action, ctx, operation) do
     case rate_limits(action, ctx) do
       [] ->
@@ -640,17 +638,19 @@ defmodule Enact do
 
       buckets ->
         limiter = fetch_rate_limiter!(action)
-        full = Enum.flat_map(buckets, &check_bucket(limiter, &1))
 
-        if full == [] do
+        with :ok <- apply_buckets(limiter, :check, buckets, action, ctx, operation) do
           {:ok, {limiter, buckets}}
-        else
-          Enum.each(full, &emit_rate_limited(&1, action, ctx, operation))
-          retry_after_ms = full |> Enum.map(&elem(&1, 1)) |> Enum.max()
-          {:error, Error.rate_limited(retry_after_ms)}
         end
     end
   end
+
+  # A bucket can fill between check/3 and hit/3. hit/3 counts and checks
+  # in one step, so the run stops here, before the transaction opens.
+  defp hit_rate_limits(nil, _action, _ctx), do: :ok
+
+  defp hit_rate_limits({limiter, buckets}, action, ctx),
+    do: apply_buckets(limiter, :hit, buckets, action, ctx, :run)
 
   defp rate_limits(action, ctx) do
     if function_exported?(action, :rate_limits, 1) do
@@ -674,8 +674,20 @@ defmodule Enact do
 
   defp valid_bucket?(_other), do: false
 
-  defp check_bucket(limiter, {key, window_ms, limit} = bucket) do
-    case limiter.check(key, window_ms, limit) do
+  defp apply_buckets(limiter, fun, buckets, action, ctx, operation) do
+    case Enum.flat_map(buckets, &apply_bucket(limiter, fun, &1)) do
+      [] ->
+        :ok
+
+      full ->
+        Enum.each(full, &emit_rate_limited(&1, action, ctx, operation))
+        retry_after_ms = full |> Enum.map(&elem(&1, 1)) |> Enum.max()
+        {:error, Error.rate_limited(retry_after_ms)}
+    end
+  end
+
+  defp apply_bucket(limiter, fun, {key, window_ms, limit} = bucket) do
+    case apply(limiter, fun, [key, window_ms, limit]) do
       :ok ->
         []
 
@@ -684,34 +696,9 @@ defmodule Enact do
 
       other ->
         raise ArgumentError,
-              "#{inspect(limiter)}.check/3 must return :ok or " <>
+              "#{inspect(limiter)}.#{fun}/3 must return :ok or " <>
                 "{:error, retry_after_ms}; got: #{inspect(other)}"
     end
-  end
-
-  # The write has committed, so a failing adapter is logged and the run
-  # still returns {:ok, result} and calls after_commit/2.
-  defp hit_buckets(nil), do: :ok
-
-  defp hit_buckets({limiter, buckets}) do
-    Enum.each(buckets, fn {key, window_ms, limit} ->
-      try do
-        limiter.hit(key, window_ms, limit)
-      rescue
-        exception ->
-          log_hit_failure(limiter, key, Exception.format(:error, exception, __STACKTRACE__))
-      catch
-        kind, reason ->
-          log_hit_failure(limiter, key, Exception.format(kind, reason, __STACKTRACE__))
-      end
-    end)
-  end
-
-  defp log_hit_failure(limiter, key, formatted) do
-    Logger.error(
-      "#{inspect(limiter)}.hit/3 failed for rate-limit key #{inspect(key)}; " <>
-        "the write committed but was not counted\n" <> formatted
-    )
   end
 
   defp cast(action, ctx) do

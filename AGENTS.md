@@ -14,9 +14,9 @@ Follow the [Google developer documentation style guide](https://developers.googl
 
 Write dead prose. State what the code does, what the caller gets, and what to do next. Do not argue the design, narrate the change, or explain why an alternative was rejected — that belongs in `spec.md`.
 
-- Present tense, active voice, second person ("you")
+- Present tense, active voice, second person ("you", not "we" or "let's")
 - Short sentences. Lead with the fact.
 - No aphorisms, slogans, or flourishes
-- No "simply", "just", "easy", or "let's"
+- Do not call a step trivial ("simply call", "just pass", "it's easy to")
 - No metaphors or figurative language
 - Comments explain non-obvious constraints, not what the next line does
