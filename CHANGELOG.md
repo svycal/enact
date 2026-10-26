@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.0 (2026-10-26)
 
 - `rate_limits/1` optional callback on `Enact.Action`. It returns
   rate-limit buckets as `{key, window_ms, limit}`. `Enact.run/3` and
