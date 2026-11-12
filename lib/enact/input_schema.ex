@@ -61,8 +61,9 @@ defmodule Enact.InputSchema do
 
   Deliberate asymmetry: nested item modules (invoked by `cast_embed`, not
   the runner) are mode-blind and implement Ecto's native `changeset/2` —
-  they do not adopt this behaviour. They take the bare
-  `import Enact.InputSchema` and still cast with `cast_input/4`, since
+  they do not adopt this behaviour. They adopt
+  `Enact.EmbeddedInputSchema` (or take the bare
+  `import Enact.InputSchema`) and still cast with `cast_input/4`, since
   item fields have the same empty-string concerns as top-level fields. If
   an item schema is later promoted to a top-level input for some action,
   it gains a `changeset/3` alongside its `changeset/2` — same module,
@@ -77,31 +78,17 @@ defmodule Enact.InputSchema do
 
   ## Partial embeds
 
-  The default embed contract is replace-wholesale. The optional
-  `partial_embeds/1` manifest declares `embeds_one` fields that accept
-  partial objects instead: `Enact.updates/2` filters their sub-keys by
-  presence in raw params, so the updates map (and therefore previews and
-  confirmation digests) contains exactly the sub-keys the caller sent. An
-  explicitly-null sub-key is present as `nil` (a clear); an omitted
-  sub-key is absent (untouched), matching the omitted-vs-null handling of
-  top-level fields. An object with no provided sub-keys (`{}`, or only
-  undeclared keys) is absent from the updates map. `execute/2` merges the
-  partial object over the
-  subject's current value via `Enact.merged/4`.
-
-  `embeds_many` fields cannot be declared partial — merging arrays
-  requires item identity, which is a different contract. Validations still
-  see the partially-cast object (the base never seeds embeds); rules about
-  the merged result use `Enact.merged/4` in the action's `validate/2`,
-  and the execute-side merge uses the same function.
+  The default embed contract is replace-wholesale. An `embeds_one` item
+  module that passes `partial: true` to `use Enact.EmbeddedInputSchema`
+  accepts partial objects instead. The declaration lives on the item module, not on the
+  input module. See `Enact.EmbeddedInputSchema`.
   """
 
   @callback changeset(base :: struct(), params :: map(), mode :: atom()) :: Ecto.Changeset.t()
   @callback fields(mode :: atom()) :: [atom()]
   @callback from_subject(subject :: struct()) :: struct()
-  @callback partial_embeds(mode :: atom()) :: [atom()]
 
-  @optional_callbacks from_subject: 1, partial_embeds: 1
+  @optional_callbacks from_subject: 1
 
   @doc """
   Adopts the contract: sets `@behaviour Enact.InputSchema` and imports

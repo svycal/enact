@@ -297,12 +297,16 @@ defmodule Enact do
   closed regardless of input. `Ecto.Changeset.cast` accepts the map
   as-is; just don't merge string-keyed entries into it.
 
-  For embeds declared in the input module's `partial_embeds/1` manifest,
-  the dumped map contains only the sub-keys the caller provided (an
-  explicitly-null sub-key is present as `nil`; an omitted one is absent).
-  If the caller provided none of its sub-keys (`{}`, or only keys the
-  input schema does not declare), the embed is absent. See
-  `Enact.InputSchema`.
+  For an `embeds_one` whose item module is partial
+  (`Enact.EmbeddedInputSchema`), the dumped map contains only the
+  sub-keys the caller provided (an explicitly-null sub-key is present as
+  `nil`; an omitted one is absent). If the caller provided none of its
+  sub-keys (`{}`, or only keys the item schema does not declare), the
+  embed is absent. The same filtering applies to a partial embed at any
+  depth, including one inside a replace-wholesale `embeds_one`. There,
+  an object with no provided sub-keys is present as `%{}`, because a
+  replace-wholesale map keeps every key. Items of an `embeds_many` are
+  never filtered.
 
   Never use bare `apply_changes/1` output for persistence — it erases
   omitted-vs-provided. For `input: nil` actions this returns `%{}`.
@@ -315,19 +319,19 @@ defmodule Enact do
     |> Ecto.Changeset.apply_changes()
     |> dump(module)
     |> Map.take(provided)
-    |> filter_partial_embeds(module, ctx)
+    |> filter_partial_embeds(module, ctx, [], true)
   end
 
   def updates(%Ecto.Changeset{}, %Context{}), do: %{}
 
   @doc """
-  Builds the per-sub-key result-state view of a partial embed
-  (`partial_embeds/1`, see `Enact.InputSchema`) — the values the object
-  will hold after the write.
+  Builds the result-state view of an `embeds_one` — the values the
+  object will hold after the write.
 
-  Each key reads the caller's casted value where the key was provided
-  (an explicit null reads as a clear) and the subject's current value
-  where it was not. It is used in two places:
+  For a partial embed (see `Enact.EmbeddedInputSchema`), each key reads
+  the caller's casted value where the key was provided (an explicit null
+  reads as a clear) and the subject's current value where it was not. It
+  is used in two places:
 
     * **`validate/2`** — rules about the merged result read it directly:
 
@@ -347,8 +351,8 @@ defmodule Enact do
   change is `nil`, so the fallback returns the old value when the caller
   sends an explicit null. Presence-gating handles nil-clears correctly.
 
-  The key list defaults to the embed's scalar fields, derived from the
-  schema; pass an explicit list to restrict it. Cases:
+  The key list defaults to every field of the embed's item schema; pass
+  an explicit list to restrict it. Cases:
 
     * sub-key provided → the casted incoming value (explicit null → `nil`)
     * sub-key omitted → the subject's current value
@@ -357,6 +361,23 @@ defmodule Enact do
       being cleared)
     * no current object (create mode, or a nil subject value) → unprovided
       keys read `nil`
+
+  A provided sub-key that is itself an embed resolves as follows:
+
+    * explicitly null → `nil`
+    * an `embeds_one` whose item module is partial → merged key by key
+      with the same rules
+    * an `embeds_one` whose item module is not partial → every key reads
+      the incoming value; an unprovided key reads `nil`
+    * an `embeds_many` → the incoming list, dumped to plain maps
+
+  These rules apply at every depth, so a partial embed inside a
+  replace-wholesale embed still merges over the subject's current value.
+
+  When the embed's own item module is not partial and the caller
+  provided the embed, every top-level key reads the incoming value, and
+  nested embeds resolve by the rules above. With a schemaless changeset
+  the keys always merge.
 
   Returns a plain atom-keyed map. On an already-invalid changeset the
   incoming values may be incomplete (there is no cast-stage fast-fail);
@@ -367,57 +388,123 @@ defmodule Enact do
 
   def merged(%Ecto.Changeset{} = changeset, %Context{} = ctx, embed, keys)
       when is_atom(embed) do
-    keys = keys || derive_embed_keys!(changeset, embed)
+    related = embed_module(changeset, embed)
+    keys = keys || derive_embed_keys!(changeset, embed, related)
     incoming = Ecto.Changeset.get_field(changeset, embed)
     current = ctx.subject && Map.get(ctx.subject, embed)
 
-    if provided?(ctx, embed) and is_nil(incoming) do
+    cond do
+      not provided?(ctx, embed) ->
+        Map.new(keys, &{&1, current && Map.get(current, &1)})
+
       # whole-object explicit null: the object is being cleared
-      Map.from_keys(keys, nil)
-    else
-      Map.new(keys, fn key ->
-        source = if provided?(ctx, [embed, key]), do: incoming, else: current
-        {key, source && Map.get(source, key)}
-      end)
+      is_nil(incoming) ->
+        Map.from_keys(keys, nil)
+
+      true ->
+        merge_keys(related, keys, incoming, current, ctx, [embed])
     end
   end
 
-  defp derive_embed_keys!(%Ecto.Changeset{data: %module{}}, embed) do
-    unless embed in module.__schema__(:embeds) do
-      raise ArgumentError,
-            "merged/4 expects #{inspect(embed)} to be an embed on #{inspect(module)}"
-    end
+  # the result-state of a provided embeds_one object. A partial module
+  # reads unprovided keys from the current value; any other module reads
+  # every key from the incoming value. Both recurse, so a partial embed
+  # below a replace-wholesale embed still merges.
+  defp merge_keys(module, keys, incoming, current, ctx, path) do
+    partial = is_nil(module) or partial?(module)
 
-    related = module.__schema__(:embed, embed).related
-    related.__schema__(:fields) -- related.__schema__(:embeds)
+    Map.new(keys, fn key ->
+      key_path = path ++ [key]
+      current_value = current && Map.get(current, key)
+
+      value =
+        if partial and not provided?(ctx, key_path) do
+          current_value
+        else
+          module
+          |> nested_embed(key)
+          |> merge_value(Map.get(incoming, key), current_value, ctx, key_path)
+        end
+
+      {key, value}
+    end)
   end
 
-  defp derive_embed_keys!(%Ecto.Changeset{}, embed) do
+  defp merge_value(nil, value, _current, _ctx, _path), do: value
+
+  defp merge_value(%{cardinality: :one, related: related}, %{} = value, current, ctx, path) do
+    merge_keys(related, related.__schema__(:fields), value, current, ctx, path)
+  end
+
+  # nil, or an embeds_many: items have no identity to merge by
+  defp merge_value(%{related: related}, value, _current, _ctx, _path) do
+    dump_embed(value, related)
+  end
+
+  defp nested_embed(nil, _key), do: nil
+
+  defp nested_embed(module, key) do
+    if key in module.__schema__(:embeds), do: module.__schema__(:embed, key)
+  end
+
+  # nil for a schemaless changeset or a field that is not an embed
+  defp embed_module(%Ecto.Changeset{data: %module{}}, embed) do
+    if function_exported?(module, :__schema__, 2) and embed in module.__schema__(:embeds) do
+      module.__schema__(:embed, embed).related
+    end
+  end
+
+  defp embed_module(%Ecto.Changeset{}, _embed), do: nil
+
+  defp derive_embed_keys!(_changeset, _embed, related) when not is_nil(related) do
+    related.__schema__(:fields)
+  end
+
+  defp derive_embed_keys!(%Ecto.Changeset{data: %module{}}, embed, nil) do
+    raise ArgumentError,
+          "merged/4 expects #{inspect(embed)} to be an embed on #{inspect(module)}"
+  end
+
+  defp derive_embed_keys!(%Ecto.Changeset{}, embed, nil) do
     raise ArgumentError,
           "merged/4 cannot derive keys for #{inspect(embed)} on a schemaless " <>
             "changeset — pass the key list explicitly"
   end
 
-  # sub-key presence filtering for declared partial embeds: caller-said
-  # interpretation only — the world-merge stays in execute/2
-  defp filter_partial_embeds(updates, module, ctx) do
-    Enum.reduce(partial_embeds(module, ctx.mode), updates, fn field, updates ->
-      case updates do
-        %{^field => %{} = value} ->
-          case Enum.filter(Map.keys(value), &provided?(ctx, [field, &1])) do
-            [] -> Map.delete(updates, field)
-            provided -> %{updates | field => Map.take(value, provided)}
+  # sub-key presence filtering for partial embeds: caller-said
+  # interpretation only — the world-merge stays in execute/2. Recurses
+  # through every embeds_one, so a partial embed below a replace-wholesale
+  # embed is still filtered. `presence_keyed` is true when the map holds
+  # only provided keys (the top level, or a partial embed); an empty
+  # partial embed is dropped there and kept as `%{}` elsewhere.
+  defp filter_partial_embeds(map, module, ctx, path, presence_keyed) do
+    Enum.reduce(module.__schema__(:embeds), map, fn field, map ->
+      with %{^field => %{} = value} <- map,
+           %{cardinality: :one, related: related} <- module.__schema__(:embed, field) do
+        field_path = path ++ [field]
+        partial = partial?(related)
+
+        value =
+          if partial do
+            Map.filter(value, fn {key, _} -> provided?(ctx, field_path ++ [key]) end)
+          else
+            value
           end
 
-        # absent (untouched) or nil (explicit whole-object clear)
-        _ ->
-          updates
+        case filter_partial_embeds(value, related, ctx, field_path, partial) do
+          empty when empty == %{} and partial and presence_keyed -> Map.delete(map, field)
+          filtered -> %{map | field => filtered}
+        end
+      else
+        # absent (untouched), nil (explicit whole-object clear), or embeds_many
+        _ -> map
       end
     end)
   end
 
-  defp partial_embeds(module, mode) do
-    if function_exported?(module, :partial_embeds, 1), do: module.partial_embeds(mode), else: []
+  defp partial?(module) do
+    Code.ensure_loaded?(module) and function_exported?(module, :__enact__, 1) and
+      module.__enact__(:partial)
   end
 
   # unwraps embed structs into plain maps, recursively; only fields the

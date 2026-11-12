@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased
+
+- **Breaking:** partial embeds are declared on the item module, with
+  `use Enact.EmbeddedInputSchema, partial: true`. The module is new. The
+  `partial_embeds/1` callback on
+  `Enact.InputSchema` is removed, and `Enact.Guardrails` raises when an
+  input module still exports it.
+- Partial embeds work at any depth. `Enact.updates/2` filters a partial
+  `embeds_one` by presence wherever it sits, including inside another
+  partial embed or inside a replace-wholesale `embeds_one`. Items of an
+  `embeds_many` are still replaced wholesale.
+- **Breaking:** `Enact.merged/4` reads the item module's `partial:`
+  declaration. It merges key by key only where the module is partial. For a provided
+  embed whose module is not partial, every key reads the incoming
+  value.
+- **Breaking:** `Enact.merged/4` includes nested embeds in its default
+  key list and resolves them recursively. Previously the default key
+  list held scalar fields only.
+
 ## 0.3.0 (2026-10-26)
 
 - `rate_limits/1` optional callback on `Enact.Action`. It returns
