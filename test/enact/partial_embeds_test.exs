@@ -165,10 +165,44 @@ defmodule Enact.PartialEmbedsTest do
       assert updates.settings == %{allow_a: false}
     end
 
-    test "embeds whose module is not partial keep wholesale semantics" do
-      # MilestoneInput does not declare `partial: true` — milestones dump
-      # with all item fields, nils included (pinned by the existing suite)
-      refute function_exported?(EnactTest.MilestoneInput, :__enact__, 1)
+    defmodule WholesaleSettingsInput do
+      use Ecto.Schema
+      use Enact.EmbeddedInputSchema
+
+      @primary_key false
+      embedded_schema do
+        field :allow_a, :boolean
+        field :allow_b, :boolean
+      end
+
+      def changeset(item, params), do: cast_input(item, params, [:allow_a, :allow_b])
+    end
+
+    defmodule WholesalePrefInput do
+      use Ecto.Schema
+      use Enact.InputSchema
+      import Ecto.Changeset
+
+      @primary_key false
+      embedded_schema do
+        embeds_one :settings, WholesaleSettingsInput
+      end
+
+      @impl Enact.InputSchema
+      def changeset(base, params, _mode), do: base |> cast(params, []) |> cast_embed(:settings)
+
+      @impl Enact.InputSchema
+      def fields(_mode), do: [:settings]
+    end
+
+    test "an embed whose module is not partial keeps every key" do
+      for params <- [%{"settings" => %{"allow_b" => false}}, %{"settings" => %{}}] do
+        ctx = %Enact.Context{params: params, mode: :create}
+        changeset = WholesalePrefInput.changeset(%WholesalePrefInput{}, params, :create)
+
+        assert Enact.updates(changeset, ctx) ==
+                 %{settings: %{allow_a: nil, allow_b: params["settings"]["allow_b"]}}
+      end
     end
   end
 
