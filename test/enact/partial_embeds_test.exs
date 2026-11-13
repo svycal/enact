@@ -249,6 +249,56 @@ defmodule Enact.PartialEmbedsTest do
       def partial_embeds(_mode), do: [:settings]
     end
 
+    defmodule PartialManyInput do
+      use Ecto.Schema
+      use Enact.InputSchema
+      import Ecto.Changeset
+
+      @primary_key false
+      embedded_schema do
+        embeds_many :items, SettingsInput
+      end
+
+      @impl Enact.InputSchema
+      def changeset(base, params, _mode), do: cast_embed(cast(base, params, []), :items)
+
+      @impl Enact.InputSchema
+      def fields(_mode), do: [:items]
+    end
+
+    # a partial module deeper inside an embeds_many item: PrefInput embeds
+    # the partial SettingsInput with embeds_one
+    defmodule ManyPrefsInput do
+      use Ecto.Schema
+      use Enact.InputSchema
+      import Ecto.Changeset
+
+      @primary_key false
+      embedded_schema do
+        embeds_many :prefs, PrefInput
+      end
+
+      @impl Enact.InputSchema
+      def changeset(base, params, _mode) do
+        base
+        |> cast(params, [])
+        |> cast_embed(:prefs, with: &PrefInput.changeset(&1, &2, :create))
+      end
+
+      @impl Enact.InputSchema
+      def fields(_mode), do: [:prefs]
+    end
+
+    test "an embeds_many of a partial module raises a teaching error" do
+      assert_raise ArgumentError, ~r/embeds_many :items.*declares `partial: true`/s, fn ->
+        Enact.Guardrails.assert_valid_input_schema!(PartialManyInput, mode: :create)
+      end
+    end
+
+    test "a partial module deeper inside an embeds_many item passes" do
+      assert Enact.Guardrails.assert_valid_input_schema!(ManyPrefsInput, mode: :create) == :ok
+    end
+
     test "a partial_embeds/1 export raises a teaching error" do
       assert_raise ArgumentError, ~r/exports partial_embeds\/1/, fn ->
         Enact.Guardrails.assert_valid_input_schema!(LegacyManifestInput, mode: :create)

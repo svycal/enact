@@ -44,7 +44,7 @@ defmodule Enact.NestedPartialEmbedsTest do
       field :title, :string
       embeds_one :opt_in, OptInInput
       embeds_one :location, LocationInput
-      embeds_many :extras, OptInInput
+      embeds_many :extras, LocationInput
     end
 
     def changeset(item, params) do
@@ -87,7 +87,7 @@ defmodule Enact.NestedPartialEmbedsTest do
       title: "Stored title",
       opt_in: %{visible: true, label: "Stored label"},
       location: %{kind: "phone", address: "555", opt_in: %{visible: true, label: "Loc"}},
-      extras: [%{visible: true, label: "Extra"}]
+      extras: [%{kind: "zoom", address: "1", opt_in: %{visible: true, label: "Extra"}}]
     }
   }
 
@@ -160,9 +160,15 @@ defmodule Enact.NestedPartialEmbedsTest do
   end
 
   describe "updates/2 inside an embeds_many" do
-    test "a partial module is replaced wholesale" do
-      assert updates(%{"form" => %{"extras" => [%{"visible" => false}]}}) ==
-               %{form: %{extras: [%{visible: false, label: nil}]}}
+    test "a partial module inside an item is replaced wholesale" do
+      params = %{"form" => %{"extras" => [%{"opt_in" => %{"visible" => false}}]}}
+
+      assert updates(params) ==
+               %{
+                 form: %{
+                   extras: [%{kind: nil, address: nil, opt_in: %{visible: false, label: nil}}]
+                 }
+               }
     end
   end
 
@@ -217,6 +223,10 @@ defmodule Enact.NestedPartialEmbedsTest do
       defstruct [:id, :visible, :label, :internal]
     end
 
+    defmodule StoredExtra do
+      defstruct [:id, :kind, :address, :opt_in]
+    end
+
     defmodule StoredForm do
       defstruct [:id, :title, :opt_in, :location, extras: []]
     end
@@ -229,7 +239,14 @@ defmodule Enact.NestedPartialEmbedsTest do
           title: "Stored title",
           opt_in: %StoredOptIn{id: "opt", visible: true, label: "Stored label", internal: "x"},
           location: nil,
-          extras: [%StoredOptIn{id: "extra", visible: true, label: "Extra", internal: "y"}]
+          extras: [
+            %StoredExtra{
+              id: "extra",
+              kind: "zoom",
+              address: "1",
+              opt_in: %StoredOptIn{id: "opt2", visible: true, label: "Extra", internal: "y"}
+            }
+          ]
         }
       }
     end
@@ -238,7 +255,7 @@ defmodule Enact.NestedPartialEmbedsTest do
       title: "Stored title",
       opt_in: %{visible: true, label: "Stored label"},
       location: nil,
-      extras: [%{visible: true, label: "Extra"}]
+      extras: [%{kind: "zoom", address: "1", opt_in: %{visible: true, label: "Extra"}}]
     }
 
     test "an unprovided nested embed reads as plain maps with the item schema's fields" do
@@ -323,8 +340,10 @@ defmodule Enact.NestedPartialEmbedsTest do
 
   describe "merged/4 with embeds_many and explicit keys" do
     test "a provided embeds_many replaces the current value" do
-      assert merged(%{"form" => %{"extras" => [%{"visible" => false}]}}).extras ==
-               [%{visible: false, label: nil}]
+      params = %{"form" => %{"extras" => [%{"opt_in" => %{"visible" => false}}]}}
+
+      assert merged(params).extras ==
+               [%{kind: nil, address: nil, opt_in: %{visible: false, label: nil}}]
     end
 
     test "an explicit key list restricts the result" do

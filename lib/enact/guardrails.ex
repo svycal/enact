@@ -42,7 +42,9 @@ defmodule Enact.Guardrails do
   4. top-level module only: missing `changeset/3` or `fields/1` exports,
      or missing `from_subject/1` when `mode: :patch` is given (nested item
      modules are exempt — they implement `changeset/2` for `cast_embed`)
-  5. top-level module only: a `partial_embeds/1` export. Partial embeds
+  5. an `embeds_many` at any level whose item module declares
+     `partial: true` (`Enact.EmbeddedInputSchema`)
+  6. top-level module only: a `partial_embeds/1` export. Partial embeds
      are declared on the item module (`Enact.EmbeddedInputSchema`).
 
   Options: `:mode` — the referencing action's mode; `:patch` requires
@@ -62,12 +64,30 @@ defmodule Enact.Guardrails do
       check_schema!(module)
 
       Enum.reduce(module.__schema__(:embeds), MapSet.put(visited, module), fn name, visited ->
-        related = module.__schema__(:embed, name).related
-        ensure_schema!(related)
-        walk(related, visited)
+        embed = module.__schema__(:embed, name)
+        ensure_schema!(embed.related)
+        check_partial_many!(module, name, embed)
+        walk(embed.related, visited)
       end)
     end
   end
+
+  defp check_partial_many!(module, name, %{cardinality: :many, related: related}) do
+    if function_exported?(related, :__enact__, 1) and related.__enact__(:partial) do
+      raise ArgumentError, """
+      input schema #{inspect(module)} embeds #{inspect(related)} with \
+      embeds_many #{inspect(name)}, and #{inspect(related)} declares \
+      `partial: true`.
+
+      Partial semantics require embeds_one: array items have no identity to \
+      merge by, so each item is replaced wholesale and the declaration would \
+      have no effect. Embed a module that is not partial instead. See the \
+      Enact.EmbeddedInputSchema docs.\
+      """
+    end
+  end
+
+  defp check_partial_many!(_module, _name, _embed), do: :ok
 
   defp ensure_schema!(module) do
     unless Code.ensure_loaded?(module) and function_exported?(module, :__schema__, 1) do

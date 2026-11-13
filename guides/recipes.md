@@ -459,7 +459,7 @@ PATCH { "booking_form": { "marketing_opt_in": { "visible": false } } }
 
 `Enact.updates/2` returns `%{booking_form: %{marketing_opt_in: %{visible: false}}}`. `Enact.merged(changeset, ctx, :booking_form)` returns the whole form with `marketing_opt_in` merged key by key over the stored object, so the execute-side merge above needs no change.
 
-A partial embed does not depend on the embed that contains it. Inside a replace-wholesale `embeds_one`, the outer object is replaced and the partial embed merges over the stored value at the same path. Inside an `embeds_many`, the declaration has no effect and each item is replaced wholesale.
+A partial embed does not depend on the embed that contains it. Inside a replace-wholesale `embeds_one`, the outer object is replaced and the partial embed merges over the stored value at the same path. A partial module cannot be embedded with `embeds_many`; the guardrails raise. Deeper inside an `embeds_many` item, the declaration has no effect and the item is replaced wholesale.
 
 ### Validating the merged result
 

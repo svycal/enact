@@ -61,9 +61,14 @@ defmodule Enact.EmbeddedInputSchema do
       same path. If the caller sends the outer object without the
       partial embed, the partial embed is cleared with the rest.
 
-  The declaration has no effect inside an `embeds_many`. Array items
-  have no identity to merge by, so each item is replaced wholesale,
-  including the embeds inside it.
+  Do not embed a partial module with `embeds_many`. Array items have no
+  identity to merge by, so each item is replaced wholesale, and
+  `Enact.Guardrails` raises on that combination.
+
+  A partial module can sit deeper inside an `embeds_many` item, for
+  example when the item module is also a top-level input for another
+  action. There the declaration has no effect: the item is replaced
+  wholesale, including the embeds inside it.
 
   The declaration applies to every field that embeds the module. To use
   one shape as partial in one input and wholesale in another, define two

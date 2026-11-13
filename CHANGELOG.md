@@ -10,7 +10,8 @@
 - Partial embeds work at any depth. `Enact.updates/2` filters a partial
   `embeds_one` by presence wherever it sits, including inside another
   partial embed or inside a replace-wholesale `embeds_one`. Items of an
-  `embeds_many` are still replaced wholesale.
+  `embeds_many` are still replaced wholesale, and `Enact.Guardrails`
+  raises when an `embeds_many` embeds a partial module.
 - **Breaking:** `Enact.merged/4` reads the item module's `partial:`
   declaration. It merges key by key only where the module is partial. For a provided
   embed whose module is not partial, every key reads the incoming
