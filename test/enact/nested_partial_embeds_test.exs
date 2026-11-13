@@ -212,6 +212,49 @@ defmodule Enact.NestedPartialEmbedsTest do
     end
   end
 
+  describe "merged/4 with a subject that stores structs" do
+    defmodule StoredOptIn do
+      defstruct [:id, :visible, :label, :internal]
+    end
+
+    defmodule StoredForm do
+      defstruct [:id, :title, :opt_in, :location, extras: []]
+    end
+
+    defp stored do
+      %{
+        name: "Link",
+        form: %StoredForm{
+          id: "form",
+          title: "Stored title",
+          opt_in: %StoredOptIn{id: "opt", visible: true, label: "Stored label", internal: "x"},
+          location: nil,
+          extras: [%StoredOptIn{id: "extra", visible: true, label: "Extra", internal: "y"}]
+        }
+      }
+    end
+
+    @plain %{
+      title: "Stored title",
+      opt_in: %{visible: true, label: "Stored label"},
+      location: nil,
+      extras: [%{visible: true, label: "Extra"}]
+    }
+
+    test "an unprovided nested embed reads as plain maps with the item schema's fields" do
+      assert merged(%{"form" => %{"title" => "New"}}, stored()) == %{@plain | title: "New"}
+    end
+
+    test "an omitted embed reads as plain maps" do
+      assert merged(%{"name" => "New"}, stored()) == @plain
+    end
+
+    test "an empty nested object and an omitted one read the same" do
+      assert merged(%{"form" => %{"opt_in" => %{}}}, stored()) ==
+               merged(%{"form" => %{}}, stored())
+    end
+  end
+
   describe "merged/4 with a partial embed inside a replace-wholesale embed" do
     test "the wholesale embed reads every key from the incoming value" do
       assert merged(%{"form" => %{"location" => %{"kind" => "zoom"}}}).location ==

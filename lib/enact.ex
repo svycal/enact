@@ -362,6 +362,11 @@ defmodule Enact do
     * no current object (create mode, or a nil subject value) → unprovided
       keys read `nil`
 
+  An unprovided sub-key that is itself an embed reads the subject's
+  current value as plain maps that hold the item schema's fields. A
+  stored struct is converted, and fields the item schema does not
+  declare are left out.
+
   A provided sub-key that is itself an embed resolves as follows:
 
     * explicitly null → `nil`
@@ -395,7 +400,7 @@ defmodule Enact do
 
     cond do
       not provided?(ctx, embed) ->
-        Map.new(keys, &{&1, current && Map.get(current, &1)})
+        Map.new(keys, &{&1, current_value(related, &1, current)})
 
       # whole-object explicit null: the object is being cleared
       is_nil(incoming) ->
@@ -415,15 +420,14 @@ defmodule Enact do
 
     Map.new(keys, fn key ->
       key_path = path ++ [key]
-      current_value = current && Map.get(current, key)
 
       value =
         if partial and not provided?(ctx, key_path) do
-          current_value
+          current_value(module, key, current)
         else
           module
           |> nested_embed(key)
-          |> merge_value(Map.get(incoming, key), current_value, ctx, key_path)
+          |> merge_value(Map.get(incoming, key), current && Map.get(current, key), ctx, key_path)
         end
 
       {key, value}
@@ -440,6 +444,28 @@ defmodule Enact do
   defp merge_value(%{related: related}, value, _current, _ctx, _path) do
     dump_embed(value, related)
   end
+
+  # the subject's value for a key. A stored embed is often a persistence
+  # struct, so it is projected to plain maps holding the input schema's
+  # fields: the same shape a merged embed has.
+  defp current_value(module, key, current) do
+    value = current && Map.get(current, key)
+
+    case nested_embed(module, key) do
+      nil -> value
+      %{related: related} -> project(value, related)
+    end
+  end
+
+  defp project(list, related) when is_list(list), do: Enum.map(list, &project(&1, related))
+
+  defp project(%{} = value, related) do
+    Map.new(related.__schema__(:fields), fn field ->
+      {field, current_value(related, field, value)}
+    end)
+  end
+
+  defp project(value, _related), do: value
 
   defp nested_embed(nil, _key), do: nil
 
