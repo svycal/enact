@@ -231,6 +231,18 @@ defmodule Enact.PartialEmbedsTest do
       end
     end
 
+    test "the :partial option accepts a compile-time expression" do
+      [{module, _}] =
+        Code.compile_string("""
+        defmodule Enact.PartialEmbedsTest.FromAttribute do
+          @flag true
+          use Enact.EmbeddedInputSchema, partial: @flag
+        end
+        """)
+
+      assert module.__enact__(:partial)
+    end
+
     test "a non-boolean :partial fails at compile time" do
       assert_raise ArgumentError, ~r/expects :partial to be true or false/, fn ->
         Code.compile_string("""

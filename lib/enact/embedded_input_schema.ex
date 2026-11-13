@@ -82,17 +82,16 @@ defmodule Enact.EmbeddedInputSchema do
       Defaults to `false`.
   """
   defmacro __using__(opts) do
-    opts = Keyword.validate!(opts, partial: false)
-    partial = opts[:partial]
-
-    unless is_boolean(partial) do
-      raise ArgumentError,
-            "use Enact.EmbeddedInputSchema expects :partial to be true or false, " <>
-              "got: #{Macro.to_string(partial)}"
-    end
-
-    quote do
+    quote bind_quoted: [opts: opts] do
       import Enact.InputSchema, only: [cast_input: 3, cast_input: 4]
+
+      partial = opts |> Keyword.validate!(partial: false) |> Keyword.fetch!(:partial)
+
+      unless is_boolean(partial) do
+        raise ArgumentError,
+              "use Enact.EmbeddedInputSchema expects :partial to be true or false, " <>
+                "got: #{inspect(partial)}"
+      end
 
       @doc false
       def __enact__(:partial), do: unquote(partial)
