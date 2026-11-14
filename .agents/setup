@@ -1,0 +1,101 @@
+#!/usr/bin/env bash
+# Installs Erlang/OTP, Elixir, Hex, and rebar, then fetches and compiles deps.
+# Versions match the "latest" job in .github/workflows/ci.yml.
+set -euo pipefail
+
+OTP_VERSION="29.1.2"
+OTP_SHA256="2cfca446976fc61962585a1c77e5d11ddb6f5fed83e84668a2c4acfaad60d22e"
+ELIXIR_VERSION="1.20.5"
+ELIXIR_SHA256="f424d6f0bb710a1d4898f2645d8ad6cab3f5eab8d71848c0dda2579d3a8e8a06"
+
+# Hex publishes OTP builds for Ubuntu only. The Ubuntu 24.04 build runs on the
+# orb's Debian image because both ship glibc, OpenSSL 3, and ncurses 6.
+OTP_URL="https://builds.hex.pm/builds/otp/amd64/ubuntu-24.04/OTP-${OTP_VERSION}.tar.gz"
+ELIXIR_URL="https://builds.hex.pm/builds/elixir/v${ELIXIR_VERSION}-otp-${OTP_VERSION%%.*}.zip"
+
+BEAM_ROOT="$HOME/.local/share/beam"
+OTP_DIR="$BEAM_ROOT/otp-$OTP_VERSION"
+ELIXIR_DIR="$BEAM_ROOT/elixir-$ELIXIR_VERSION-otp-${OTP_VERSION%%.*}"
+BIN_DIR="$HOME/.local/bin"
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$repo_root"
+
+step() {
+  local label="$1"
+  shift
+  local start=$SECONDS
+  echo "==> $label"
+  "$@"
+  echo "    done in $((SECONDS - start))s"
+}
+
+download() {
+  local url="$1" sha="$2" dest="$3"
+  curl -fsSL --retry 3 -o "$dest" "$url"
+  echo "$sha  $dest" | sha256sum -c --quiet -
+}
+
+install_otp() {
+  if [[ -x "$OTP_DIR/bin/erl" ]]; then
+    echo "    OTP $OTP_VERSION already installed"
+    return
+  fi
+  local tmp
+  tmp="$(mktemp -d)"
+  download "$OTP_URL" "$OTP_SHA256" "$tmp/otp.tar.gz"
+  mkdir -p "$tmp/otp"
+  tar -xzf "$tmp/otp.tar.gz" -C "$tmp/otp" --strip-components=1
+  rm -rf "$OTP_DIR"
+  mkdir -p "$BEAM_ROOT"
+  mv "$tmp/otp" "$OTP_DIR"
+  (cd "$OTP_DIR" && ./Install -minimal "$OTP_DIR" >/dev/null)
+  rm -rf "$tmp"
+}
+
+install_elixir() {
+  if [[ -x "$ELIXIR_DIR/bin/elixir" ]]; then
+    echo "    Elixir $ELIXIR_VERSION already installed"
+    return
+  fi
+  local tmp
+  tmp="$(mktemp -d)"
+  download "$ELIXIR_URL" "$ELIXIR_SHA256" "$tmp/elixir.zip"
+  unzip -q "$tmp/elixir.zip" -d "$tmp/elixir"
+  rm -rf "$ELIXIR_DIR"
+  mkdir -p "$BEAM_ROOT"
+  mv "$tmp/elixir" "$ELIXIR_DIR"
+  rm -rf "$tmp"
+}
+
+# ~/.local/bin is on PATH in the orb's login shells, so Amp and supervised
+# services find these commands without a profile hook.
+link_binaries() {
+  mkdir -p "$BIN_DIR"
+  local name
+  for name in erl erlc escript; do
+    ln -sfn "$OTP_DIR/bin/$name" "$BIN_DIR/$name"
+  done
+  for name in elixir elixirc iex mix; do
+    ln -sfn "$ELIXIR_DIR/bin/$name" "$BIN_DIR/$name"
+  done
+}
+
+install_mix_tools() {
+  mix local.hex --force --if-missing >/dev/null
+  mix local.rebar --force --if-missing >/dev/null
+}
+
+fetch_and_compile() {
+  mix deps.get
+  mix compile
+  MIX_ENV=test mix compile
+}
+
+export PATH="$BIN_DIR:$PATH"
+
+step "Erlang/OTP $OTP_VERSION" install_otp
+step "Elixir $ELIXIR_VERSION" install_elixir
+step "Link binaries into $BIN_DIR" link_binaries
+step "Hex and rebar" install_mix_tools
+step "Fetch and compile dependencies" fetch_and_compile
