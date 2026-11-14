@@ -42,6 +42,10 @@ defmodule Enact.Guardrails do
   4. top-level module only: missing `changeset/3` or `fields/1` exports,
      or missing `from_subject/1` when `mode: :patch` is given (nested item
      modules are exempt — they implement `changeset/2` for `cast_embed`)
+  5. an `embeds_many` at any level whose item module declares
+     `partial: true` (`Enact.EmbeddedInputSchema`)
+  6. top-level module only: a `partial_embeds/1` export. Partial embeds
+     are declared on the item module (`Enact.EmbeddedInputSchema`).
 
   Options: `:mode` — the referencing action's mode; `:patch` requires
   `from_subject/1`.
@@ -60,12 +64,30 @@ defmodule Enact.Guardrails do
       check_schema!(module)
 
       Enum.reduce(module.__schema__(:embeds), MapSet.put(visited, module), fn name, visited ->
-        related = module.__schema__(:embed, name).related
-        ensure_schema!(related)
-        walk(related, visited)
+        embed = module.__schema__(:embed, name)
+        ensure_schema!(embed.related)
+        check_partial_many!(module, name, embed)
+        walk(embed.related, visited)
       end)
     end
   end
+
+  defp check_partial_many!(module, name, %{cardinality: :many, related: related}) do
+    if function_exported?(related, :__enact__, 1) and related.__enact__(:partial) do
+      raise ArgumentError, """
+      input schema #{inspect(module)} embeds #{inspect(related)} with \
+      embeds_many #{inspect(name)}, and #{inspect(related)} declares \
+      `partial: true`.
+
+      Partial semantics require embeds_one: array items have no identity to \
+      merge by, so each item is replaced wholesale and the declaration would \
+      have no effect. Embed a module that is not partial instead. See the \
+      Enact.EmbeddedInputSchema docs.\
+      """
+    end
+  end
+
+  defp check_partial_many!(_module, _name, _embed), do: :ok
 
   defp ensure_schema!(module) do
     unless Code.ensure_loaded?(module) and function_exported?(module, :__schema__, 1) do
@@ -171,31 +193,16 @@ defmodule Enact.Guardrails do
       """
     end
 
-    if mode != nil and function_exported?(module, :partial_embeds, 1) do
-      embeds = module.__schema__(:embeds)
+    if function_exported?(module, :partial_embeds, 1) do
+      raise ArgumentError, """
+      input schema #{inspect(module)} exports partial_embeds/1, which Enact \
+      no longer reads.
 
-      Enum.each(module.partial_embeds(mode), fn field ->
-        cond do
-          field not in embeds ->
-            raise ArgumentError, """
-            input schema #{inspect(module)} declares partial_embeds entry \
-            #{inspect(field)}, which is not an embed on the schema.\
-            """
-
-          module.__schema__(:embed, field).cardinality != :one ->
-            raise ArgumentError, """
-            input schema #{inspect(module)} declares partial_embeds entry \
-            #{inspect(field)}, which is an embeds_many.
-
-            Partial semantics require embeds_one: arrays replace wholesale, and \
-            merging array items requires item identity — a different contract. \
-            See the Enact.InputSchema docs.\
-            """
-
-          true ->
-            :ok
-        end
-      end)
+      Declare partial semantics on the embedded item module instead: \
+      `use Enact.EmbeddedInputSchema, partial: true` there. \
+      Without it, the embed is replaced wholesale. See the \
+      Enact.EmbeddedInputSchema docs.\
+      """
     end
   end
 end

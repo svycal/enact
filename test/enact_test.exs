@@ -726,6 +726,7 @@ defmodule EnactTest do
 
   defmodule Flags do
     use Ecto.Schema
+    use Enact.EmbeddedInputSchema, partial: true
     import Ecto.Changeset
 
     @primary_key false

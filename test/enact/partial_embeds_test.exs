@@ -14,7 +14,7 @@ defmodule Enact.PartialEmbedsTest do
 
   defmodule SettingsInput do
     use Ecto.Schema
-    import Enact.InputSchema, only: [cast_input: 3]
+    use Enact.EmbeddedInputSchema, partial: true
 
     @primary_key false
     embedded_schema do
@@ -48,9 +48,6 @@ defmodule Enact.PartialEmbedsTest do
 
     @impl Enact.InputSchema
     def from_subject(pref), do: %__MODULE__{name: pref.name}
-
-    @impl Enact.InputSchema
-    def partial_embeds(_mode), do: [:settings]
   end
 
   defmodule UpdatePref do
@@ -168,10 +165,44 @@ defmodule Enact.PartialEmbedsTest do
       assert updates.settings == %{allow_a: false}
     end
 
-    test "undeclared embeds keep wholesale semantics" do
-      # ProjectInput has no partial_embeds/1 — its milestones dump with all
-      # item fields, nils included (pinned by the existing suite)
-      refute function_exported?(EnactTest.ProjectInput, :partial_embeds, 1)
+    defmodule WholesaleSettingsInput do
+      use Ecto.Schema
+      use Enact.EmbeddedInputSchema
+
+      @primary_key false
+      embedded_schema do
+        field :allow_a, :boolean
+        field :allow_b, :boolean
+      end
+
+      def changeset(item, params), do: cast_input(item, params, [:allow_a, :allow_b])
+    end
+
+    defmodule WholesalePrefInput do
+      use Ecto.Schema
+      use Enact.InputSchema
+      import Ecto.Changeset
+
+      @primary_key false
+      embedded_schema do
+        embeds_one :settings, WholesaleSettingsInput
+      end
+
+      @impl Enact.InputSchema
+      def changeset(base, params, _mode), do: base |> cast(params, []) |> cast_embed(:settings)
+
+      @impl Enact.InputSchema
+      def fields(_mode), do: [:settings]
+    end
+
+    test "an embed whose module is not partial keeps every key" do
+      for params <- [%{"settings" => %{"allow_b" => false}}, %{"settings" => %{}}] do
+        ctx = %Enact.Context{params: params, mode: :create}
+        changeset = WholesalePrefInput.changeset(%WholesalePrefInput{}, params, :create)
+
+        assert Enact.updates(changeset, ctx) ==
+                 %{settings: %{allow_a: nil, allow_b: params["settings"]["allow_b"]}}
+      end
     end
   end
 
@@ -204,6 +235,20 @@ defmodule Enact.PartialEmbedsTest do
   end
 
   describe "guardrails" do
+    defmodule LegacyManifestInput do
+      use Ecto.Schema
+      import Ecto.Changeset
+
+      @primary_key false
+      embedded_schema do
+        embeds_one :settings, SettingsInput
+      end
+
+      def changeset(base, params, _mode), do: cast_embed(cast(base, params, []), :settings)
+      def fields(_mode), do: [:settings]
+      def partial_embeds(_mode), do: [:settings]
+    end
+
     defmodule PartialManyInput do
       use Ecto.Schema
       use Enact.InputSchema
@@ -219,40 +264,76 @@ defmodule Enact.PartialEmbedsTest do
 
       @impl Enact.InputSchema
       def fields(_mode), do: [:items]
-
-      @impl Enact.InputSchema
-      def partial_embeds(_mode), do: [:items]
     end
 
-    defmodule PartialTypoInput do
+    # a partial module deeper inside an embeds_many item: PrefInput embeds
+    # the partial SettingsInput with embeds_one
+    defmodule ManyPrefsInput do
       use Ecto.Schema
       use Enact.InputSchema
       import Ecto.Changeset
 
       @primary_key false
       embedded_schema do
-        field :name, :string
+        embeds_many :prefs, PrefInput
       end
 
       @impl Enact.InputSchema
-      def changeset(base, params, _mode), do: cast(base, params, [:name])
+      def changeset(base, params, _mode) do
+        base
+        |> cast(params, [])
+        |> cast_embed(:prefs, with: &PrefInput.changeset(&1, &2, :create))
+      end
 
       @impl Enact.InputSchema
-      def fields(_mode), do: [:name]
-
-      @impl Enact.InputSchema
-      def partial_embeds(_mode), do: [:settings]
+      def fields(_mode), do: [:prefs]
     end
 
-    test "declaring an embeds_many raises a teaching error" do
-      assert_raise ArgumentError, ~r/which is an embeds_many/, fn ->
+    test "an embeds_many of a partial module raises a teaching error" do
+      assert_raise ArgumentError, ~r/embeds_many :items.*declares `partial: true`/s, fn ->
         Enact.Guardrails.assert_valid_input_schema!(PartialManyInput, mode: :create)
       end
     end
 
-    test "declaring a non-embed raises a teaching error" do
-      assert_raise ArgumentError, ~r/not an embed on the schema/, fn ->
-        Enact.Guardrails.assert_valid_input_schema!(PartialTypoInput, mode: :create)
+    test "a partial module deeper inside an embeds_many item passes" do
+      assert Enact.Guardrails.assert_valid_input_schema!(ManyPrefsInput, mode: :create) == :ok
+    end
+
+    test "a partial_embeds/1 export raises a teaching error" do
+      assert_raise ArgumentError, ~r/exports partial_embeds\/1/, fn ->
+        Enact.Guardrails.assert_valid_input_schema!(LegacyManifestInput, mode: :create)
+      end
+    end
+
+    test "an unknown use option fails at compile time" do
+      assert_raise ArgumentError, ~r/unknown keys \[:partal\]/, fn ->
+        Code.compile_string("""
+        defmodule Enact.PartialEmbedsTest.Misspelled do
+          use Enact.EmbeddedInputSchema, partal: true
+        end
+        """)
+      end
+    end
+
+    test "the :partial option accepts a compile-time expression" do
+      [{module, _}] =
+        Code.compile_string("""
+        defmodule Enact.PartialEmbedsTest.FromAttribute do
+          @flag true
+          use Enact.EmbeddedInputSchema, partial: @flag
+        end
+        """)
+
+      assert module.__enact__(:partial)
+    end
+
+    test "a non-boolean :partial fails at compile time" do
+      assert_raise ArgumentError, ~r/expects :partial to be true or false/, fn ->
+        Code.compile_string("""
+        defmodule Enact.PartialEmbedsTest.NotBoolean do
+          use Enact.EmbeddedInputSchema, partial: :yes
+        end
+        """)
       end
     end
 

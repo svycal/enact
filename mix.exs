@@ -69,6 +69,7 @@ defmodule Enact.MixProject do
         "Behaviours & protocols": [
           Enact.Action,
           Enact.InputSchema,
+          Enact.EmbeddedInputSchema,
           Enact.Actor,
           Enact.RateLimiter
         ],

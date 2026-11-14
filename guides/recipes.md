@@ -322,7 +322,7 @@ The cases resolve as follows: `""` persists as `""`; `"   "` counts as empty and
 
 ## 6. Partial updates on a singular embed
 
-The default embed contract is replace-wholesale. For a singular config object — a `booking_policy` with several flags — that forces callers to send the whole object to change one flag. Declaring the embed in the input module's `partial_embeds/1` manifest switches it to partial-object semantics: `Enact.updates/2` filters its sub-keys by presence, so the updates map, previews, and confirmation digests carry exactly what the caller sent, one level down. (`embeds_many` cannot be declared partial — merging arrays requires item identity, which is a different contract; the guardrails enforce this.)
+The default embed contract is replace-wholesale. For a singular config object — a `booking_policy` with several flags — that forces callers to send the whole object to change one flag. Passing `partial: true` to `use Enact.EmbeddedInputSchema` in the item schema switches it to partial-object semantics: `Enact.updates/2` filters its sub-keys by presence, so the updates map, previews, and confirmation digests carry exactly what the caller sent. (The declaration has no effect inside an `embeds_many` — merging arrays requires item identity, which is a different contract.)
 
 ```json
 PATCH { "booking_policy": { "allow_booking": false } }
@@ -334,7 +334,7 @@ The item schema stays shape-only. Partial sends cast over an empty struct, so `v
 # lib/my_app/scheduling/inputs/booking_policy_input.ex
 defmodule MyApp.Scheduling.Inputs.BookingPolicyInput do
   use Ecto.Schema
-  import Enact.InputSchema, only: [cast_input: 3]
+  use Enact.EmbeddedInputSchema, partial: true
 
   @primary_key false
   embedded_schema do
@@ -373,9 +373,6 @@ defmodule MyApp.Scheduling.Inputs.LinkInput do
 
   @impl Enact.InputSchema
   def from_subject(link), do: %__MODULE__{name: link.name}
-
-  @impl Enact.InputSchema
-  def partial_embeds(_mode), do: [:booking_policy]
 end
 ```
 
@@ -430,6 +427,39 @@ end
 ```
 
 The cases resolve as follows: a provided sub-key merges; an explicitly-null sub-key is present as `nil` and clears that flag; an omitted sub-key is absent and stays untouched; a null for the whole object clears everything; an object with no provided sub-keys (`{}`, or only undeclared keys) is absent from the updates map, the same as an omitted embed. Previews and digests contain exactly the provided sub-keys, so the user confirms the partial change itself.
+
+### Nesting partial embeds
+
+A partial item schema can embed another partial item schema. Each module passes its own `partial: true`; the input module declares nothing:
+
+```elixir
+defmodule MyApp.Scheduling.Inputs.BookingFormInput do
+  use Ecto.Schema
+  use Enact.EmbeddedInputSchema, partial: true
+  import Ecto.Changeset
+
+  @primary_key false
+  embedded_schema do
+    field :title, :string
+    # MarketingOptInInput also passes partial: true
+    embeds_one :marketing_opt_in, MyApp.Scheduling.Inputs.MarketingOptInInput
+  end
+
+  def changeset(item, params) do
+    item
+    |> cast_input(params, [:title])
+    |> cast_embed(:marketing_opt_in)
+  end
+end
+```
+
+```json
+PATCH { "booking_form": { "marketing_opt_in": { "visible": false } } }
+```
+
+`Enact.updates/2` returns `%{booking_form: %{marketing_opt_in: %{visible: false}}}`. `Enact.merged(changeset, ctx, :booking_form)` returns the whole form with `marketing_opt_in` merged key by key over the stored object, so the execute-side merge above needs no change.
+
+A partial embed does not depend on the embed that contains it. Inside a replace-wholesale `embeds_one`, the outer object is replaced and the partial embed merges over the stored value at the same path. A partial module cannot be embedded with `embeds_many`; the guardrails raise. Deeper inside an `embeds_many` item, the declaration has no effect and the item is replaced wholesale.
 
 ### Validating the merged result
 
