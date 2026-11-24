@@ -18,7 +18,7 @@ defmodule Enact.RateLimiter do
       `authorize/1`.
     * `hit/3` counts one write against a bucket and reports whether the
       bucket had room for it, in one atomic step. `Enact.run/3` calls it
-      once per bucket after validation and before the transaction opens.
+      once per bucket after validation and before `execute/2` runs.
       A full bucket stops the run with `:rate_limited`.
 
   Each bucket is `{key, window_ms, limit}`: at most `limit` writes per

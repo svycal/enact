@@ -27,13 +27,8 @@ defmodule Enact.Action do
     * `mode: :create | :patch` (default `:create`)
     * `anonymous?: boolean` (default `false`)
     * `transaction: boolean` (default `true`) — whether `execute/2` runs
-      inside `repo.transact/1`. Set `transaction: false` when
-      `execute/2` makes an external call, such as an HTTP request to a
-      third-party API, and writes nothing to the database that a
-      rollback should undo. The runner then calls `execute/2` directly,
-      so it holds no pooled connection during the call, and writes made
-      along the way, such as a refreshed OAuth token, are not rolled back
-      on error. Results map the same way in both modes.
+      inside `repo.transact/1`. Set `false` when `execute/2` makes an
+      external call and writes nothing to the database.
   """
   @callback config() :: keyword()
 
@@ -92,7 +87,7 @@ defmodule Enact.Action do
 
   Dry runs check buckets without counting. Runs count one write against
   every bucket after validation and the digest check, just before
-  `repo.transact/1`. The adapter counts and checks in one step, so
+  `execute/2` runs. The adapter counts and checks in one step, so
   concurrent runs cannot exceed `limit`. An invalid run or a digest
   mismatch uses no slot. A run that rolls back after counting still uses
   its slots. So does a run that another bucket rejects at the count: it
@@ -135,8 +130,9 @@ defmodule Enact.Action do
   @doc """
   Persists the write. Runs inside `repo.transact/1`; `{:error, reason}`
   rolls back. With `transaction: false` in `config/0`, runs outside a
-  transaction and nothing rolls back. A returned `%Ecto.Changeset{}` error (declared constraints)
-  is promoted to `:invalid`; any other error becomes `:internal`.
+  transaction and nothing rolls back. A returned `%Ecto.Changeset{}`
+  error (declared constraints) is promoted to `:invalid`; any other error
+  becomes `:internal`.
   """
   @callback execute(changeset :: Ecto.Changeset.t(), ctx :: Context.t()) ::
               {:ok, term()} | {:error, term()}

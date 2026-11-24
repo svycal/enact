@@ -120,7 +120,7 @@ Ordering invariants (structural, not conventional):
 2. **Authorize before rate limit, rate limit before cast** — a forbidden actor never touches a bucket (it cannot exhaust another actor's limit), and a rate-limited caller triggers no input work.
 3. **Validate before resolve** — cheap gates expensive; garbage input never triggers reference loads.
 4. **Load before authorize and cast** — `authorize/1` reads `ctx.subject`; in patch mode the subject also supplies the validation base via `from_subject/1` (§5.3).
-5. **Execute inside `repo.transact/1`**; `{:error, reason}` from execute rolls back. `after_commit` runs strictly after successful commit, outside the transaction. An action whose `execute/2` makes an external call and writes nothing to the database declares `transaction: false` in `config/0`. The runner then calls `execute/2` directly: no pooled connection is held during the call, and writes made along the way (a refreshed OAuth token, a reconnect flag) are not rolled back on error. Result normalization, rate-limit counting, the digest check, telemetry, and the success-only `after_commit` are the same in both modes.
+5. **Execute inside `repo.transact/1`**; `{:error, reason}` from execute rolls back. `after_commit` runs strictly after successful commit, outside the transaction. An action whose `execute/2` makes an external call and writes nothing to the database declares `transaction: false` in `config/0`, and the runner calls `execute/2` directly. No pooled connection is held during the call, and writes made along the way (a refreshed OAuth token) survive an error.
 
 Runner error normalization:
 

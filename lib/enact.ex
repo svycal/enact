@@ -83,8 +83,8 @@ defmodule Enact do
   Returns `{:ok, result}` (whatever `execute/2` produced) or
   `{:error, %Enact.Error{}}`.
 
-  After validation and the digest check, and before the transaction
-  opens, the runner counts one write against each bucket from
+  After validation and the digest check, and before `execute/2` runs,
+  the runner counts one write against each bucket from
   `rate_limits/1`. If a bucket filled after the earlier check, the run
   returns `:rate_limited` and writes nothing.
 
@@ -561,6 +561,7 @@ defmodule Enact do
     config = action.config()
     ensure_authorize!(action)
     mode = fetch_mode!(action, config)
+    ensure_transaction!(action, config)
 
     case action.input() do
       nil -> :ok
@@ -722,6 +723,14 @@ defmodule Enact do
     end
   end
 
+  defp ensure_transaction!(action, config) do
+    unless is_boolean(Keyword.get(config, :transaction, true)) do
+      raise ArgumentError,
+            "#{inspect(action)}.config/0 returned transaction: " <>
+              "#{inspect(config[:transaction])}; expected true or false"
+    end
+  end
+
   ## Pipeline steps
 
   defp gate_anonymous(config, actor) do
@@ -865,17 +874,10 @@ defmodule Enact do
 
   defp persist(action, config, changeset, ctx) do
     result =
-      case Keyword.get(config, :transaction, true) do
-        true ->
-          ctx.repo.transact(fn -> execute(action, changeset, ctx) end)
-
-        false ->
-          execute(action, changeset, ctx)
-
-        other ->
-          raise ArgumentError,
-                "#{inspect(action)}.config/0 returned transaction: #{inspect(other)}; " <>
-                  "expected true or false"
+      if Keyword.get(config, :transaction, true) do
+        ctx.repo.transact(fn -> execute(action, changeset, ctx) end)
+      else
+        execute(action, changeset, ctx)
       end
 
     case result do

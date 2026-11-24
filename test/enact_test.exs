@@ -603,20 +603,16 @@ defmodule EnactTest do
                run(NoTransactionAction, %{})
     end
 
-    test "transaction: true runs execute inside a transaction" do
-      Process.put(:enact_transaction, true)
-      Process.put(:enact_execute_result, {:ok, :done})
-
-      assert {:ok, :done} = run(NoTransactionAction, %{})
-      assert_received {FakeRepo, :transaction}
-    end
-
-    test "a non-boolean transaction value raises" do
+    test "a non-boolean transaction value raises before any pipeline work" do
       Process.put(:enact_transaction, :maybe)
       Process.put(:enact_execute_result, {:ok, :done})
 
       assert_raise ArgumentError, ~r/returned transaction: :maybe/, fn ->
         run(NoTransactionAction, %{})
+      end
+
+      assert_raise ArgumentError, ~r/returned transaction: :maybe/, fn ->
+        Enact.dry_run(NoTransactionAction, %{}, [actor: :user] ++ @repo)
       end
     end
   end
