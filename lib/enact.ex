@@ -109,7 +109,7 @@ defmodule Enact do
     with {:ok, changeset, ctx, _resolved, limits} <- pre_execute(action, config, ctx, :run),
          :ok <- check_digest(action, changeset, ctx, opts),
          :ok <- hit_rate_limits(limits, action, ctx),
-         {:ok, result} <- persist(action, changeset, ctx) do
+         {:ok, result} <- persist(action, config, changeset, ctx) do
       # the success event fires after commit but before after_commit/2, so
       # a raising side effect cannot suppress the audit record of a
       # committed write
@@ -863,21 +863,39 @@ defmodule Enact do
     end
   end
 
-  defp persist(action, changeset, ctx) do
-    transaction_result =
-      ctx.repo.transaction(fn ->
-        case action.execute(changeset, ctx) do
-          {:ok, result} -> result
-          {:error, reason} -> ctx.repo.rollback(reason)
-          other -> ctx.repo.rollback({:bad_execute_return, other})
-        end
-      end)
+  defp persist(action, config, changeset, ctx) do
+    result =
+      case Keyword.get(config, :transaction, true) do
+        true ->
+          ctx.repo.transaction(fn ->
+            case execute(action, changeset, ctx) do
+              {:ok, result} -> result
+              {:error, reason} -> ctx.repo.rollback(reason)
+            end
+          end)
 
-    case transaction_result do
+        false ->
+          execute(action, changeset, ctx)
+
+        other ->
+          raise ArgumentError,
+                "#{inspect(action)}.config/0 returned transaction: #{inspect(other)}; " <>
+                  "expected true or false"
+      end
+
+    case result do
       {:ok, result} -> {:ok, result}
       {:error, %Ecto.Changeset{} = failed} -> {:error, Error.invalid(failed)}
       {:error, %Error{} = error} -> {:error, error}
       {:error, reason} -> {:error, Error.internal(reason)}
+    end
+  end
+
+  defp execute(action, changeset, ctx) do
+    case action.execute(changeset, ctx) do
+      {:ok, _result} = ok -> ok
+      {:error, _reason} = error -> error
+      other -> {:error, {:bad_execute_return, other}}
     end
   end
 

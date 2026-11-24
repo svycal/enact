@@ -182,6 +182,25 @@ defmodule EnactTest do
     def after_commit(_result, _ctx), do: send(self(), :after_commit_called)
   end
 
+  defmodule NoTransactionAction do
+    use Enact.Action
+
+    @impl Enact.Action
+    def config, do: [transaction: Process.get(:enact_transaction, false)]
+
+    @impl Enact.Action
+    def input, do: nil
+
+    @impl Enact.Action
+    def authorize(_ctx), do: true
+
+    @impl Enact.Action
+    def execute(_changeset, _ctx), do: Process.get(:enact_execute_result)
+
+    @impl Enact.Action
+    def after_commit(_result, _ctx), do: send(self(), :after_commit_called)
+  end
+
   ## Actor enforcement
 
   describe "actor enforcement" do
@@ -534,6 +553,71 @@ defmodule EnactTest do
 
       assert {:error, %Error{type: :internal, reason: {:bad_execute_return, :done}}} =
                run(FailingExecuteAction, %{})
+    end
+  end
+
+  describe "transaction: false" do
+    test "execute runs outside a transaction; after_commit runs on success" do
+      Process.put(:enact_execute_result, {:ok, :done})
+
+      assert {:ok, :done} = run(NoTransactionAction, %{})
+      refute_received {FakeRepo, :transaction}
+      assert_received :after_commit_called
+    end
+
+    test "a changeset error from execute is promoted to :invalid" do
+      failed =
+        Ecto.Changeset.change({%{}, %{slug: :string}})
+        |> Ecto.Changeset.add_error(:slug, "has already been taken")
+
+      Process.put(:enact_execute_result, {:error, failed})
+
+      assert {:error, %Error{type: :invalid, changeset: ^failed}} =
+               run(NoTransactionAction, %{})
+
+      refute_received {FakeRepo, :transaction}
+      refute_received :after_commit_called
+    end
+
+    test "an Enact.Error from execute passes through" do
+      Process.put(:enact_execute_result, {:error, Error.conflict(:claimed)})
+
+      assert {:error, %Error{type: :conflict, reason: :claimed}} =
+               run(NoTransactionAction, %{})
+
+      refute_received :after_commit_called
+    end
+
+    test "any other execute failure is :internal" do
+      Process.put(:enact_execute_result, {:error, :boom})
+
+      assert {:error, %Error{type: :internal, reason: :boom}} = run(NoTransactionAction, %{})
+      refute_received {FakeRepo, :transaction}
+      refute_received :after_commit_called
+    end
+
+    test "a non-tuple execute return is :internal" do
+      Process.put(:enact_execute_result, :done)
+
+      assert {:error, %Error{type: :internal, reason: {:bad_execute_return, :done}}} =
+               run(NoTransactionAction, %{})
+    end
+
+    test "transaction: true runs execute inside a transaction" do
+      Process.put(:enact_transaction, true)
+      Process.put(:enact_execute_result, {:ok, :done})
+
+      assert {:ok, :done} = run(NoTransactionAction, %{})
+      assert_received {FakeRepo, :transaction}
+    end
+
+    test "a non-boolean transaction value raises" do
+      Process.put(:enact_transaction, :maybe)
+      Process.put(:enact_execute_result, {:ok, :done})
+
+      assert_raise ArgumentError, ~r/returned transaction: :maybe/, fn ->
+        run(NoTransactionAction, %{})
+      end
     end
   end
 
