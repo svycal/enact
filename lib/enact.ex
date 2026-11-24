@@ -867,12 +867,7 @@ defmodule Enact do
     result =
       case Keyword.get(config, :transaction, true) do
         true ->
-          ctx.repo.transaction(fn ->
-            case execute(action, changeset, ctx) do
-              {:ok, result} -> result
-              {:error, reason} -> ctx.repo.rollback(reason)
-            end
-          end)
+          ctx.repo.transact(fn -> execute(action, changeset, ctx) end)
 
         false ->
           execute(action, changeset, ctx)

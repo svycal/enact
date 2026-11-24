@@ -2,8 +2,11 @@
 
 ## Unreleased
 
+- **Breaking:** requires Ecto 3.13 or later. The runner opens the
+  `execute/2` transaction with `repo.transact/1` instead of the
+  deprecated `repo.transaction/1`.
 - `transaction: false` in `Enact.Action.config/0` runs `execute/2`
-  outside `repo.transaction/1`. Use it for an `execute/2` that makes an
+  outside `repo.transact/1`. Use it for an `execute/2` that makes an
   external call and writes nothing to the database. Result mapping,
   rate-limit counting, the digest check, telemetry, and `after_commit/2`
   behave the same as with the default, `transaction: true`. Any other

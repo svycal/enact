@@ -29,7 +29,7 @@ defmodule Enact.MixProject do
 
   defp deps do
     [
-      {:ecto, "~> 3.10"},
+      {:ecto, "~> 3.13"},
       {:telemetry, "~> 1.0"},
       {:ex_doc, "~> 0.31", only: :dev, runtime: false}
     ]
