@@ -13,7 +13,7 @@ The value is the uniform pipeline shape, the actor context, and the closed error
 ```elixir
 def deps do
   [
-    {:enact, "~> 0.3.0"}
+    {:enact, "~> 0.4.0"}
   ]
 end
 ```

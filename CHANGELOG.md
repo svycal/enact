@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.0 (2026-11-24)
 
 - **Breaking:** requires Ecto 3.13 or later. The runner opens the
   `execute/2` transaction with `repo.transact/1` instead of the
